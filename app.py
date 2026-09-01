@@ -1,10 +1,13 @@
 import streamlit as st
-from langchain_community.document_loaders import UnstructuredFileLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain.chains import RetrievalQA
-from langchain_openai import ChatOpenAI
+ from langchain_community.document_loaders import UnstructuredFileLoader
+ from langchain.text_splitter import RecursiveCharacterTextSplitter
+ from langchain_openai import OpenAIEmbeddings
+ from langchain_community.vectorstores import Chroma
+ from langchain.chains import RetrievalQA
+ from langchain_openai import ChatOpenAI
+ from langchain_core.runnables import RunnablePassthrough
+ from langchain_core.output_parsers import StrOutputParser
+ from langchain_core.prompts import ChatPromptTemplate
 import os
 from dotenv import load_dotenv
 
@@ -61,12 +64,26 @@ with st.sidebar:
             vectorstore = initialize_vectorstore(uploaded_files)
             retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
             llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
-            qa_chain = RetrievalQA.from_chain_type(
-                llm=llm,
-                retriever=retriever,
-                return_source_documents=True
+            # 新增文档格式化函数（解决LangChain 0.2.14+的上下文格式问题）
+            def format_docs(docs):
+                return "\n\n".join([f"📄 {doc.metadata.get('source', '文档')}:\n{doc.page_content}" for doc in docs])
+            
+            # 使用新式LangChain链构建方式（兼容0.2.14+）
+            template = """你是一个AI产品专家，请基于以下上下文回答问题：
+            {context}
+            
+            问题：{question}
+            请用专业但简洁的方式回答，并标注引用来源。"""
+            prompt = ChatPromptTemplate.from_template(template)
+            
+            chain = (
+                {"context": retriever | format_docs, "question": RunnablePassthrough()}
+                | prompt
+                | llm
+                | StrOutputParser()
             )
-            st.session_state.qa_chain = qa_chain
+            
+            st.session_state.chain = chain
             st.success(f"成功处理 {len(uploaded_files)} 个文档！")
 
 # 主界面
