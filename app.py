@@ -69,6 +69,13 @@ def init_state():
     if preset["default_model"] and not st.session_state["chat_model"]:
         st.session_state["chat_model"] = preset["default_model"]
 
+    # 保证 Embedding 配置有合理默认值
+    embed_preset = providers.embed_preset(st.session_state["embed_provider_label"])
+    if embed_preset["base_url"] and not st.session_state["embed_base_url"]:
+        st.session_state["embed_base_url"] = embed_preset["base_url"]
+    if embed_preset["default_model"] and not st.session_state["embed_model"]:
+        st.session_state["embed_model"] = embed_preset["default_model"]
+
 
 init_state()
 
