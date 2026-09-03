@@ -6,8 +6,15 @@ from typing import Any, Iterable
 from openai import OpenAI
 
 
-DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 DEFAULT_CHAT_MODEL = "gpt-4o-mini"
+
+
+def _client(api_key: str, base_url: str = "") -> OpenAI:
+    kwargs = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+    return OpenAI(**kwargs)
 
 
 def extract_text(file_bytes: bytes, file_name: str) -> str:
@@ -25,9 +32,7 @@ def _extract_pdf(file_bytes: bytes) -> str:
     from pypdf import PdfReader
 
     reader = PdfReader(BytesIO(file_bytes))
-    pages = []
-    for page in reader.pages:
-        pages.append(page.extract_text() or "")
+    pages = [page.extract_text() or "" for page in reader.pages]
     return "\n\n".join(pages)
 
 
@@ -37,11 +42,11 @@ def _extract_docx(file_bytes: bytes) -> str:
     from docx import Document
 
     doc = Document(BytesIO(file_bytes))
-    paragraphs = [p.text for p in doc.paragraphs]
+    lines = [p.text for p in doc.paragraphs]
     for table in doc.tables:
         for row in table.rows:
-            paragraphs.append(" | ".join(cell.text for cell in row.cells))
-    return "\n".join(paragraphs)
+            lines.append(" | ".join(cell.text for cell in row.cells))
+    return "\n".join(lines)
 
 
 def _extract_plain(file_bytes: bytes) -> str:
@@ -81,16 +86,14 @@ def chunk_text(text: str, chunk_size: int = 900, overlap: int = 120) -> list[str
     return [c for c in chunks if len(c.strip()) > 40]
 
 
-def _client(api_key: str) -> OpenAI:
-    return OpenAI(api_key=api_key)
-
-
-def embed_texts(api_key: str, texts: list[str]) -> list[list[float]]:
-    client = _client(api_key)
-    response = client.embeddings.create(
-        model=DEFAULT_EMBEDDING_MODEL,
-        input=texts,
-    )
+def embed_texts(
+    api_key: str,
+    texts: list[str],
+    base_url: str = "",
+    model: str = DEFAULT_EMBED_MODEL,
+) -> list[list[float]]:
+    client = _client(api_key, base_url)
+    response = client.embeddings.create(model=model, input=texts)
     return [item.embedding for item in response.data]
 
 
@@ -99,6 +102,10 @@ def save_kb(
     user_id: int,
     api_key: str,
     files: Iterable[Any],
+    base_url: str = "",
+    embed_model: str = "",
+    embed_api_key: str = "",
+    embed_base_url: str = "",
 ):
     chunks_meta: list[dict] = []
     for uploaded in files:
@@ -110,27 +117,36 @@ def save_kb(
     if not chunks_meta:
         raise ValueError("未能从文档中提取有效文本")
 
+    mode = "keyword"
     texts = [c["text"] for c in chunks_meta]
-    vectors = embed_texts(api_key, texts)
-    for meta, vector in zip(chunks_meta, vectors):
-        meta["embedding"] = vector
+    if embed_model and embed_api_key:
+        try:
+            vectors = embed_texts(embed_api_key, texts, embed_base_url, embed_model)
+            for meta, vector in zip(chunks_meta, vectors):
+                meta["embedding"] = vector
+            mode = "vector"
+        except Exception as exc:
+            # 若 Embedding 服务不可用，自动降级为关键词检索，不阻断用户
+            pass
 
     user_dir = data_dir / "users" / str(user_id)
     user_dir.mkdir(parents=True, exist_ok=True)
     kb_file = user_dir / "kb.json"
     kb_file.write_text(
-        json.dumps({"chunks": chunks_meta}, ensure_ascii=False, indent=2),
+        json.dumps({"mode": mode, "chunks": chunks_meta}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    return len(chunks_meta)
+    return len(chunks_meta), mode
 
 
-def load_kb(data_dir: Path, user_id: int) -> list[dict]:
+def load_kb(data_dir: Path, user_id: int) -> dict:
     kb_file = data_dir / "users" / str(user_id) / "kb.json"
     if not kb_file.exists():
-        return []
+        return {"mode": "keyword", "chunks": []}
     payload = json.loads(kb_file.read_text(encoding="utf-8"))
-    return payload.get("chunks", [])
+    payload.setdefault("mode", "keyword")
+    payload.setdefault("chunks", [])
+    return payload
 
 
 def _cosine(vec_a: list[float], vec_b: list[float]) -> float:
@@ -142,42 +158,117 @@ def _cosine(vec_a: list[float], vec_b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def retrieve(
+_TOKEN_RE = re.compile(r"([A-Za-z0-9_]+|[\u4e00-\u9fff]+)")
+
+
+def _tokenize(text: str) -> list[str]:
+    tokens = []
+    for match in _TOKEN_RE.findall(text.lower()):
+        if re.fullmatch(r"[\u4e00-\u9fff]+", match):
+            tokens.extend(match[i : i + 2] for i in range(max(1, len(match) - 1)))
+        else:
+            tokens.append(match)
+    return tokens
+
+
+def _keyword_retrieve(query: str, chunks: list[dict], top_k: int = 4) -> list[dict]:
+    query_tokens = set(_tokenize(query))
+    if not query_tokens:
+        query_tokens = set(query.lower().split())
+    scored = []
+    for chunk in chunks:
+        text_tokens = set(_tokenize(chunk["text"]))
+        hits = len(query_tokens & text_tokens)
+        if hits == 0:
+            continue
+        score = hits / max(1, len(query_tokens))
+        scored.append((score, chunk))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [
+        {"source": c["source"], "text": c["text"], "score": round(s, 4)}
+        for s, c in scored[:top_k]
+    ]
+
+
+def _vector_retrieve(
     api_key: str,
     chunks: list[dict],
     query: str,
+    base_url: str,
+    embed_model: str,
     top_k: int = 4,
 ) -> list[dict]:
-    if not chunks:
-        return []
-    query_vector = embed_texts(api_key, [query])[0]
+    query_vector = embed_texts(api_key, [query], base_url, embed_model)[0]
     scored = []
     for chunk in chunks:
+        if not chunk.get("embedding"):
+            continue
         score = _cosine(query_vector, chunk["embedding"])
         scored.append((score, chunk))
     scored.sort(key=lambda item: item[0], reverse=True)
-    results = []
-    for score, chunk in scored[:top_k]:
-        results.append(
-            {
-                "source": chunk["source"],
-                "text": chunk["text"],
-                "score": round(score, 4),
-            }
-        )
+    return [
+        {"source": c["source"], "text": c["text"], "score": round(s, 4)}
+        for s, c in scored[:top_k]
+    ]
+
+
+def retrieve(
+    query: str,
+    kb: dict,
+    chat_api_key: str,
+    chat_base_url: str = "",
+    embed_model: str = "",
+    embed_api_key: str = "",
+    embed_base_url: str = "",
+    top_k: int = 4,
+) -> list[dict]:
+    chunks = kb.get("chunks", [])
+    if not chunks:
+        return []
+    if kb.get("mode") == "vector" and embed_model and embed_api_key:
+        try:
+            return _vector_retrieve(
+                embed_api_key,
+                chunks,
+                query,
+                embed_base_url,
+                embed_model,
+                top_k,
+            )
+        except Exception:
+            # Embedding 服务异常时降级为关键词检索
+            pass
+    results = _keyword_retrieve(query, chunks, top_k)
     return results
 
 
 def answer(
     api_key: str,
     question: str,
-    chunks: list[dict],
+    kb: dict,
     history: list[dict] | None = None,
+    base_url: str = "",
     model: str = DEFAULT_CHAT_MODEL,
+    embed_model: str = "",
+    embed_api_key: str = "",
+    embed_base_url: str = "",
 ) -> dict:
+    chunks = kb.get("chunks", [])
     if not chunks:
         raise ValueError("知识库为空，请先上传并解析文档")
-    hits = retrieve(api_key, chunks, question, top_k=4)
+
+    hits = retrieve(
+        question,
+        kb,
+        api_key,
+        base_url,
+        embed_model,
+        embed_api_key,
+        embed_base_url,
+    )
+    if not hits:
+        raise ValueError("没有检索到相关内容，请换一种问法或补充文档")
+
     context = "\n\n".join(
         [f"【来源 {i + 1}：{h['source']}】\n{h['text']}" for i, h in enumerate(hits)]
     )
@@ -198,7 +289,7 @@ def answer(
             "content": f"参考资料：\n{context}\n\n问题：{question}",
         }
     )
-    client = _client(api_key)
+    client = _client(api_key, base_url)
     completion = client.chat.completions.create(
         model=model,
         messages=messages,
@@ -214,11 +305,17 @@ def answer(
     }
 
 
-def generate_suggestions(api_key: str, chunks: list[dict], model: str = DEFAULT_CHAT_MODEL) -> str:
+def generate_suggestions(
+    api_key: str,
+    kb: dict,
+    base_url: str = "",
+    model: str = DEFAULT_CHAT_MODEL,
+) -> str:
+    chunks = kb.get("chunks", [])
     if not chunks:
         raise ValueError("知识库为空，请先上传文档")
     corpus = "\n\n".join([c["text"] for c in chunks[:30]])
-    client = _client(api_key)
+    client = _client(api_key, base_url)
     completion = client.chat.completions.create(
         model=model,
         messages=[
@@ -226,13 +323,11 @@ def generate_suggestions(api_key: str, chunks: list[dict], model: str = DEFAULT_
                 "role": "system",
                 "content": (
                     "你是资深 AI 产品经理。请根据用户上传的产品文档输出结构化诊断报告，"
-                    "包含：1) 产品定位与亮点 2) 需求清晰度问题 3) 风险与遗漏 4) 可执行的改进建议 5) 面试官可能追问的问题。"
+                    "包含：1) 产品定位与亮点 2) 需求清晰度问题 3) 风险与遗漏 "
+                    "4) 可执行的改进建议 5) 面试官可能追问的问题。"
                 ),
             },
-            {
-                "role": "user",
-                "content": f"文档内容如下：\n{corpus}",
-            },
+            {"role": "user", "content": f"文档内容如下：\n{corpus}"},
         ],
         temperature=0.3,
     )
