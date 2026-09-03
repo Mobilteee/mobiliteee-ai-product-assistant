@@ -193,7 +193,13 @@ def get_kb() -> dict:
 with st.sidebar:
     st.markdown(f"**👤 {username}**")
     if st.button("退出登录", use_container_width=True):
-        for key in ["current_user", "api_key", "conversation_id"]:
+        for key in [
+            "current_user",
+            "api_key",
+            "chat_api_key",
+            "embed_api_key",
+            "conversation_id",
+        ]:
             st.session_state.pop(key, None)
         st.rerun()
 
