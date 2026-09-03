@@ -1,18 +1,20 @@
 import streamlit as st
+ import streamlit as st
  from langchain_community.document_loaders import UnstructuredFileLoader
  from langchain.text_splitter import RecursiveCharacterTextSplitter
  from langchain_openai import OpenAIEmbeddings
  from langchain_community.vectorstores import Chroma
- from langchain.chains import RetrievalQA
  from langchain_openai import ChatOpenAI
  from langchain_core.runnables import RunnablePassthrough
  from langchain_core.output_parsers import StrOutputParser
  from langchain_core.prompts import ChatPromptTemplate
-import os
-from dotenv import load_dotenv
+ import os
 
-# 加载环境变量
-load_dotenv()
+ # Streamlit Secrets 优先，本地 .env 兜底
+ def get_api_key():
+     if "OPENAI_API_KEY" in st.secrets:
+         return st.secrets["OPENAI_API_KEY"]
+     return os.getenv("OPENAI_API_KEY", "")
 
 st.set_page_config(page_title="AI 知识库助手", page_icon="🧠", layout="wide")
 
@@ -49,7 +51,7 @@ def initialize_vectorstore(uploaded_files):
 # 侧边栏配置
 with st.sidebar:
     st.header("⚙️ 配置")
-    openai_api_key = st.text_input("OpenAI API Key", type="password", value=os.getenv("OPENAI_API_KEY", ""))
+     openai_api_key = st.text_input("OpenAI API Key", type="password", value=get_api_key())
     
     st.subheader("📂 文档上传")
     uploaded_files = st.file_uploader(
@@ -83,7 +85,7 @@ with st.sidebar:
                 | StrOutputParser()
             )
             
-            st.session_state.chain = chain
+             st.session_state.qa_chain = chain
             st.success(f"成功处理 {len(uploaded_files)} 个文档！")
 
 # 主界面
