@@ -1,62 +1,56 @@
-# AI 知识库助手 — 面向 AI 产品岗的 RAG 应用
+# AI 产品知识助手（多用户版）
 
-![AI Product Knowledge Assistant](https://via.placeholder.com/800x400?text=AI+Knowledge+Assistant+Demo)
+面向 AI 产品岗求职与日常工作的 **Streamlit RAG SaaS 雏形**：多用户账号、BYOK（自带 Key）、每人独立知识库与历史记录、PRD 诊断建议、Markdown / PDF 导出。
 
-**一个专为 AI 产品岗求职者打造的可部署 RAG 应用**，帮助你快速掌握 PRD 写作、RAG 架构设计、MCP 协议等核心技能。
+## 核心亮点
 
-## 🌟 为什么这个项目适合 AI 产品岗？
+- 多用户注册 / 登录，数据按用户隔离
+- BYOK：每位用户填写自己的 OpenAI API Key，仅在浏览器会话内使用，不写入数据库
+- 轻量 RAG：无需 LangChain / Chroma，直接用 OpenAI Embedding + 余弦相似度检索
+- 上传 PDF / DOCX / Markdown / TXT，自动分块建立索引
+- 引用来源展示，避免幻觉
+- 一键生成「PRD 诊断与改进建议」
+- 导出当前会话与诊断报告（Markdown / PDF）
 
-- ✅ **完整产品生命周期展示**：从 PRD 到可部署应用，体现产品思维
-- ✅ **RAG 全链路实现**：文档解析 → Embedding → 向量存储 → 检索 → 生成
-- ✅ **专业领域知识**：聚焦 AI 产品岗所需的专业知识库
-- ✅ **可量化指标**：回答准确率 ≥85%，文档解析成功率 100%
+## 演示账号
 
-## 🚀 快速开始
+- 用户名：`demo`
+- 密码：`demo1234`
+
+## 快速开始
 
 ```bash
-# 1. 安装依赖
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
-
-# 2. 配置 API Key
-cp .env.example .env
-notepad .env  # 填入你的 OpenAI API Key
-
-# 3. 启动应用
 streamlit run app.py
 ```
 
-## 📂 项目结构
+## 项目结构
 
+```text
+.
+├── app.py                 # Streamlit 主界面
+├── core/
+│   ├── storage.py         # SQLite：用户 / 会话 / 消息
+│   ├── rag.py             # 解析、分块、Embedding、检索、生成、建议
+│   └── exporters.py       # Markdown / PDF 导出
+├── requirements.txt
+└── data/                  # 运行时自动创建（已 gitignore）
 ```
-ai-product-knowledge-assistant/
-├── docs/
-│   └── PRD.md              # 产品需求文档（面试时可展示）
-├── app.py                  # 核心应用代码
-├── requirements.txt        # 依赖管理
-├── .env.example            # 环境变量模板
-└── README.md               # 本文件
-```
 
-## 🎯 产品亮点
+## 部署（Streamlit Community Cloud）
 
-| 功能 | 产品价值 |
-|------|----------|
-| **专业文档解析** | 支持 PRD/竞品分析/行业报告的结构化解析 | 
-| **精准知识检索** | 基于 RAG 的专业问题解答，准确率 ≥85% |
-| **引用溯源** | 显示答案来源，增强可信度 |
-| **Streamlit 快速部署** | 1 命令启动，适合作品集展示 |
+1. 推送仓库到 GitHub
+2. 打开 share.streamlit.io → New app → 选择仓库与 `app.py`
+3. 无需配置密钥（用户自带 Key）
+4. 部署完成后即可访问并注册使用
 
-## 📝 产品思维展示点（面试可用）
+## 产品思维说明（面试可用）
 
-- **需求优先级**：P0 功能聚焦核心文档上传与问答，P1 功能完善用户体验
-- **指标定义**：明确回答准确率、文档解析成功率等可衡量指标
-- **技术方案权衡**：选择 ChromaDB 而非 FAISS，兼顾轻量级与功能完整性
-- **用户场景覆盖**：PRD 写作辅助、面试问题准备等真实场景
+- 明确用户场景：产品实习面试准备、PRD 写作辅助、竞品分析
+- 数据隔离策略：user_id 隔离知识库与会话
+- 隐私策略：BYOK 模式，服务端零 Key 存储
+- 指标设想：回答引用覆盖率、建议采纳率、会话留存
 
-## 📚 如何扩展？
-
-- **V2.0**：接入 MCP 协议实现工具调用
-- **V3.0**：添加用户反馈闭环，持续优化知识库
-- **V4.0**：支持多用户协作知识库
-
-> **提示**：部署到 Streamlit Sharing 或 Vercel 后，可在简历中添加「[在线体验]」链接
+> 说明：本地 SQLite 适合演示与 MVP；如需生产级多租户持久化，可平滑迁移到 Supabase / PostgreSQL。
