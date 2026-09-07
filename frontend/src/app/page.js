@@ -6,7 +6,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import Markdown from '../components/Markdown'
 import { t, resolveLang } from '../lib/i18n'
-import { streamQuery, streamSSE, listDocuments, uploadDocuments, getTaskStatus, getRetrievalConfig, submitFeedback, getDocumentContent, getConversations, createConversation, getConversationMessages, deleteConversation } from '../lib/api'
+import { streamQuery, streamSSE, listDocuments, getDocumentCategories, uploadDocuments, getTaskStatus, getRetrievalConfig, submitFeedback, getDocumentContent, getConversations, createConversation, getConversationMessages, deleteConversation } from '../lib/api'
+import GuideModal from '../components/GuideModal'
 
 
 function enhanceCitations(content) {
@@ -72,6 +73,7 @@ export default function Home() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(() => readLocal(STORAGE_KEYS.drawerOpen, true))
   const [rightTab, setRightTab] = useState('sources')
   const [documents, setDocuments] = useState([])
+  const [categoryTree, setCategoryTree] = useState(null)
   const [selectedDocIds, setSelectedDocIds] = useState(new Set())
   const [kbMode, setKbMode] = useState('keyword')
   const [docLoading, setDocLoading] = useState(true)
@@ -98,15 +100,21 @@ export default function Home() {
   const loadDocuments = async (userId) => {
     setDocLoading(true)
     try {
-      const data = await listDocuments(userId)
+      // Fetch the flat doc list and the authoritative category tree in parallel.
+      const [data, catData] = await Promise.all([
+        listDocuments(userId),
+        getDocumentCategories(userId).catch(() => null),
+      ])
       const docs = data.documents || []
       setDocuments(docs)
       setKbMode(data.mode || 'keyword')
+      setCategoryTree(catData?.categories || null)
       const ids = docs.map(d => d.id).filter(id => id != null)
       if (ids.length) setSelectedDocIds(new Set(ids))
     } catch (error) {
       console.error('Failed to load documents', error)
       setDocuments([])
+      setCategoryTree(null)
     } finally {
       setDocLoading(false)
     }
@@ -526,9 +534,23 @@ export default function Home() {
   }
   const selectedCount = selectedDocIds.size
 
-  // Topic-scope filter: categories derived from each document's `category`.
-  const docCategories = Array.from(new Set((documents || []).map(d => d.category || 'default')))
-  const docsOfCategory = (c) => (documents || []).filter(d => (d.category || 'default') === c)
+  // Topic-scope filter: the backend /documents/categories tree is authoritative
+  // and OVERRIDES any per-doc fallback — never silently collapse to ['default']
+  // while a real tree is available.
+  const catById = {};
+  (categoryTree || []).forEach(g => (g.documents || []).forEach(d => { if (d.id != null) catById[d.id] = g.category }))
+  const catOf = (d) => ((d && d.category) || catById[d && d.id] || 'default')
+  const docCategories = (() => {
+    const cats = []
+    const push = (c) => { const k = (c && String(c)) || 'default'; if (!cats.includes(k)) cats.push(k) }
+    if (categoryTree && categoryTree.length) {
+      categoryTree.forEach(g => push(g.category))
+    } else {
+      (documents || []).forEach(d => push(catOf(d)))
+    }
+    return cats.length ? cats : ['default']
+  })()
+  const docsOfCategory = (c) => (documents || []).filter(d => catOf(d) === c)
   const isCatSelected = (c) => {
     const ds = docsOfCategory(c)
     return ds.length > 0 && ds.every(d => d.id != null && selectedDocIds.has(d.id))
@@ -656,6 +678,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={toggleLang} className="rounded-full border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50">{lang === 'zh' ? '中 / EN' : 'EN / 中'}</button>
+            <GuideModal lang={lang} />
             <button type="button" onClick={clearChat} className="flex items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" />{t(lang, 'newChat')}</button>
             <button type="button" onClick={() => setIsDrawerOpen(prev => !prev)} className="flex items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-blue-50 hover:text-blue-700">
               {isDrawerOpen ? t(lang, 'hideSidebar') : t(lang, 'showSidebar')}

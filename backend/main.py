@@ -126,16 +126,187 @@ def _real_key(value) -> str:
     return v
 
 
-def _chat_cfg(data: dict) -> tuple:
+# ---- P4 demo hardening: rate limits + preset answer cache ---------------------
+
+RATE_LIMIT_MSG = (
+    "当前 Demo 体验频次已达上限，建议稍后再试或在右上角配置您的专属 API Key 解锁无限调用。"
+)
+# Recommended starters kept in sync with the frontend (zh + en). Demo requests
+# that exactly match one are served from the preset cache; arbitrary questions
+# ("自定义提问") are what the per-IP hourly cap applies to.
+DEFAULT_PRESET_STARTERS = [
+    "电商客服 PRD 中设定的分块策略与元数据字段有哪些？",
+    "传统客服与 RAG 智能客服的核心差异与业务收益？",
+    "PRD 风险审查：请评估当前客服系统的降级兜底方案",
+    "What chunking strategy and metadata fields does the e-commerce PRD define?",
+    "What are the key differences and business gains of RAG customer service vs traditional chatbot?",
+    "PRD risk review: evaluate the fallback/refusal design of this customer service system",
+]
+
+# Hand-authored static answers for the recommended starters. These back the
+# demo cache so preset questions never depend on startup API calls and never
+# consume LLM tokens. Keyed by the raw starter text; looked up via the same
+# normalized key as the runtime cache.
+_PRD_SOURCE = {
+    "source": "电商智能客服RAG系统_PRD.md #1",
+    "excerpt": "按语义段落进行切块，Chunk Size 设置为 600 tokens，Overlap 为 120 tokens。",
+    "score": 0.97,
+}
+_KB_SOURCE = {
+    "source": "AI产品岗高频面试知识库.md #1",
+    "excerpt": "RAG：检索增强生成，先检索相关知识再生成回复。",
+    "score": 0.92,
+}
+
+PRESET_STATIC_RESPONSES = {
+    "电商客服 PRD 中设定的分块策略与元数据字段有哪些？": {
+        "text": (
+            "# 分块策略与元数据字段\n\n"
+            "**分块策略**（电商智能客服 RAG 系统 PRD v1.2）：\n"
+            "- 按**语义段落**进行切块，Chunk Size = **600 tokens**，Overlap = **120 tokens**；\n"
+            "- 支持格式：PDF（店铺售后政策）、Word/MD（商品详情与规约）。\n\n"
+            "**入库元数据字段**（每条 chunk 必须携带）：店铺 ID、类目 ID、文档发布时间、生效状态（有效/作废）。\n\n"
+            "> 检索阶段执行「意图初筛 → 向量 + BM25 双路召回 → BGE-Reranker 精排取 Top-3」"
+        ),
+        "sources": [_PRD_SOURCE],
+    },
+    "传统客服与 RAG 智能客服的核心差异与业务收益？": {
+        "text": (
+            "# 传统客服 vs RAG 智能客服\n\n"
+            "**本质差异**\n"
+            "- 传统规则型 Chatbot：依赖「关键词 + 预设规则 + 决策树路由」，机械应答，**无法理解长尾复杂售后、无法关联订单与退换货数据**；\n"
+            "- RAG 智能客服：先**检索企业知识库**（向量 + BM25），再把命中的原文切片作为上下文交给大模型生成，答案**可溯源**。\n\n"
+            "**业务收益**（PRD v1.2 目标）\n"
+            "- 降低人工分流：将售前 / 退换货咨询的**人工转接率降低 40%**；\n"
+            "- 体验指标：**TTFT ≤ 800ms**、单轮问题解决率 ≥ **75%**；\n"
+            "- 知识准确：RAG 检索 **Top-3 准确率 ≥ 88%**。\n\n"
+            "**为什么用 RAG 而非微调**（面试知识库）：无需对模型高频微调，直接外挂动态企业知识，降成本、可追溯、易做权限隔离。"
+        ),
+        "sources": [_PRD_SOURCE, _KB_SOURCE],
+    },
+    "PRD 风险审查：请评估当前客服系统的降级兜底方案": {
+        "text": (
+            "# PRD 风险审查：降级兜底方案评估\n\n"
+            "**结论**：兜底链路设计较完整，主风险集中在「阈值口径单一」与「缺少人工闭环指标」，建议补充监控。\n\n"
+            "**已有防线**\n"
+            "1. **拒答兜底**：重排后最高置信度 **< 0.35** 时禁止大模型强答，统一返回“很抱歉…正在为您转接人工”，避免幻觉；\n"
+            "2. **边界风控**：涉及退款金额 / 价格争议，**强制调用底层结算 API** 查询真实订单，禁止模型虚构优惠金额；\n"
+            "3. **重排过滤**：BGE-Reranker 过滤 **得分 < 0.4** 的片段，控制送入 LLM 的上下文质量。\n\n"
+            "**建议补强**\n"
+            "- 兜底仅看单一“融合置信度”，建议增加**意图路由 + 拒答归因埋点**（哪些 query 常被拒/常错）；\n"
+            "- 为“转人工”建立**解决率与满意度回环**，量化降级对体验的实际影响；\n"
+            "- 置信度阈值建议按类目（法规 / 价格争议）差异化配置。"
+        ),
+        "sources": [_PRD_SOURCE],
+    },
+    "What chunking strategy and metadata fields does the e-commerce PRD define?": {
+        "text": (
+            "# Chunking strategy & metadata fields\n\n"
+            "The e-commerce RAG PRD (v1.2) defines:\n"
+            "- **Chunking**: split by **semantic paragraphs**, Chunk Size = **600 tokens**, Overlap = **120 tokens**;\n"
+            "- **Formats**: PDF (after-sales policy), Word/MD (product specs & rules).\n\n"
+            "**Metadata every chunk must carry**: store ID, category ID, publish time, effective status (valid / void).\n\n"
+            "Retrieval runs: intent pre-screen → dual recall (vector + BM25) → BGE-Reranker top-3."
+        ),
+        "sources": [_PRD_SOURCE],
+    },
+    "What are the key differences and business gains of RAG customer service vs traditional chatbot?": {
+        "text": (
+            "# Traditional chatbot vs RAG customer service\n\n"
+            "**Core difference**\n"
+            "- Rule-based chatbots match keywords against hand-coded rules; they can't handle long-tail, complex after-sales or join order/refund data;\n"
+            "- RAG grounds generation in retrieved knowledge chunks, so every answer is traceable.\n\n"
+            "**Business gains (PRD targets)**\n"
+            "- Lower manual hand-off rate for pre-sales / refund consultations by **40%**;\n"
+            "- **TTFT ≤ 800ms**, one-turn resolution ≥ **75%**;\n"
+            "- Retrieval **Top-3 accuracy ≥ 88%**.\n\n"
+            "Why RAG over fine-tuning: no frequent retraining, plug-in dynamic knowledge, lower cost, traceable citations."
+        ),
+        "sources": [_PRD_SOURCE, _KB_SOURCE],
+    },
+    "PRD risk review: evaluate the fallback/refusal design of this customer service system": {
+        "text": (
+            "# PRD risk review: fallback / refusal design\n\n"
+            "**Verdict**: the fallback chain is solid; the main risks are a single confidence-threshold gate and no closed-loop metrics after hand-off.\n\n"
+            "**Existing guards**\n"
+            "1. **Refusal**: post-rerank confidence < **0.35** → the model must not answer and replies “Sorry, no matching rule; transferring to an agent.”\n"
+            "2. **Boundary risk**: refund / price disputes **force a call to the settlement API**; the model never invents discounts.\n"
+            "3. **Rerank filter**: candidates scoring < **0.4** are dropped before LLM context.\n\n"
+            "**Suggested hardening**: add intent routing + refusal-attribution telemetry, close the loop on agent resolution/satisfaction, and make the threshold per-category configurable."
+        ),
+        "sources": [_PRD_SOURCE],
+    },
+}
+
+# In-memory rolling windows (ephemeral per process; fine for a demo).
+_llm_calls: list[float] = []  # demo LLM calls, shared globally, per minute
+_ip_calls: dict[str, list[float]] = {}  # per-IP demo LLM calls, per hour
+_preset_cache: dict[str, dict] = {}  # normalized question -> {"text":..., "sources":[...]}
+
+
+def _rl_limit(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except Exception:
+        return default
+
+
+def _trim(records: list[float], period: float, now: float) -> None:
+    records[:] = [t for t in records if t > now - period]
+
+
+def _window_allowed(records: list[float], limit: int, period: float, now: float) -> bool:
+    _trim(records, period, now)
+    return len(records) < limit
+
+
+def _record_now(records: list[float], now: float) -> None:
+    records.append(now)
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip() or "unknown"
+    return (request.client.host if request.client else "unknown") or "unknown"
+
+
+def _normalize_question(q: str) -> str:
+    return " ".join(str(q).split())
+
+
+def _preset_cache_key(question: str) -> str:
+    return _normalize_question(question)
+
+
+# Seed the demo cache from the hand-authored static responses so preset
+# questions never depend on startup API calls and never stay empty.
+_preset_cache.update({
+    _preset_cache_key(q): {"text": v["text"], "sources": v.get("sources", [])}
+    for q, v in PRESET_STATIC_RESPONSES.items()
+})
+
+
+def _is_recommended_starter(question: str) -> bool:
+    q = _normalize_question(question)
+    return any(_normalize_question(s) == q for s in DEFAULT_PRESET_STARTERS)
+
+
+def _demo_cfg() -> tuple:
+    key = os.getenv("DEMO_CHAT_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
+    base = os.getenv("DEMO_CHAT_BASE_URL") or os.getenv("OPENAI_BASE_URL") or ""
+    model = os.getenv("DEMO_CHAT_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+    return key, base, model
+
+
+def _chat_cfg(data: dict, header_key: str = "") -> tuple:
     """Resolve chat credentials with BYOK-first, .env demo fallback.
 
-    A real user-supplied key is authoritative: it runs against the user's own
-    base_url (default OpenAI when none given) so it is never silently pointed at
-    the demo gateway. Only when the user key is empty/placeholder do we use the
-    system .env demo credentials. If a supplied key later fails (401/403/bad
-    model), core.rag._chat_create retries once against the .env demo channel.
+    A real custom key (from the X-Custom-Api-Key header or the request body)
+    wins and bypasses the demo rate limits — the caller pays for their own LLM
+    usage. Otherwise we fall back to the system demo key, which is rate limited.
     """
-    user_key = _real_key(data.get("api_key"))
+    user_key = _real_key(header_key) or _real_key(data.get("api_key"))
     if user_key:
         base_url = (data.get("base_url") or "").strip()
         model = (data.get("model") or "").strip() or "gpt-4o-mini"
@@ -335,7 +506,39 @@ async def query(request: Request):
     kb = load_kb(data_dir, user_id, doc_ids=doc_ids)
 
     history = data.get("history") or []
-    api_key, base_url, model = _chat_cfg(data)
+
+    header_key = request.headers.get("x-custom-api-key", "")
+    custom_key = _real_key(header_key) or _real_key(data.get("api_key"))
+    api_key, base_url, model = _chat_cfg(data, header_key)
+    demo = not bool(custom_key)
+
+    # Preset exact-hit cache: demo (no custom key) requests that match a cached
+    # recommended question are served without touching the LLM.
+    preset_cache_key = _preset_cache_key(question)
+    cache_entry = None
+    if demo:
+        _entry = _preset_cache.get(preset_cache_key)
+        # Never treat an empty cached answer as a valid hit — fall through to LLM.
+        if _entry and (_entry.get("text") or "").strip():
+            cache_entry = _entry
+
+    # Rate limits only guard the shared demo key (BYOK users pay their own way).
+    if demo and cache_entry is None:
+        now = time.time()
+        client_ip = _client_ip(request)
+        ip_records = _ip_calls.setdefault(client_ip, [])
+        # Per-IP hourly cap targets arbitrary ("自定义") questions, not starters.
+        if not _is_recommended_starter(question) and not _window_allowed(
+            ip_records, _rl_limit("RATE_LIMIT_IP_PER_HOUR", 8), 3600, now
+        ):
+            raise HTTPException(status_code=429, detail=RATE_LIMIT_MSG)
+        # Global per-minute cap for every real demo LLM call.
+        if not _window_allowed(_llm_calls, _rl_limit("RATE_LIMIT_GLOBAL_PER_MIN", 8), 60, now):
+            raise HTTPException(status_code=429, detail=RATE_LIMIT_MSG)
+        if not _is_recommended_starter(question):
+            _record_now(ip_records, now)
+        _record_now(_llm_calls, now)
+
     embed_model = _env("DEMO_EMBED_MODEL")
     embed_api_key = _env("DEMO_EMBED_API_KEY")
     embed_base_url = _env("DEMO_EMBED_BASE_URL")
@@ -374,6 +577,31 @@ async def query(request: Request):
         ) + "\n\n"
 
         try:
+            if cache_entry and (cache_entry.get("text") or "").strip():
+                # Preset exact-hit: replay the cached answer as SSE, zero LLM tokens.
+                cached_sources = cache_entry.get("sources") or []
+                assistant_sources = cached_sources
+                yield "event: sources\ndata: " + json.dumps(cached_sources, ensure_ascii=False) + "\n\n"
+                cached_text = cache_entry.get("text") or ""
+                if cached_text:
+                    first_token_ms = (time.time() - started) * 1000
+                    for i in range(0, len(cached_text), 24):
+                        chunk = cached_text[i:i + 24]
+                        assistant_text += chunk
+                        yield "event: token\ndata: " + json.dumps(chunk, ensure_ascii=False) + "\n\n"
+                assistant_meta = {
+                    "latency_ms": round((time.time() - started) * 1000),
+                    "retrieve_ms": 0,
+                    "total_tokens": 0,
+                    "cached": True,
+                }
+                yield "event: done\ndata: " + json.dumps(
+                    {"total_tokens": 0, "time_ms": round((time.time() - started) * 1000),
+                     "retrieve_time_ms": 0.0, "cached": True},
+                    ensure_ascii=False,
+                ) + "\n\n"
+                return
+
             for event in stream_answer(
                 api_key,
                 question,

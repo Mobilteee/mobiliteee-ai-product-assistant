@@ -1,9 +1,13 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8000';
 
 export async function streamQuery({ question, history, apiKey, baseUrl, model, user_id, doc_ids, strategy, preset, conversation_id }) {
+  const headers = { 'Content-Type': 'application/json' };
+  // Optional BYOK pass-through: when present the backend uses this key and
+  // bypasses the shared demo rate limits.
+  if (apiKey) headers['X-Custom-Api-Key'] = apiKey;
   const response = await fetch(`${API_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       question,
       history,
@@ -19,7 +23,12 @@ export async function streamQuery({ question, history, apiKey, baseUrl, model, u
   });
 
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    let message = `API request failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (payload && payload.detail) message = String(payload.detail);
+    } catch (err) { /* keep status fallback */ }
+    throw new Error(message);
   }
   if (!response.body) {
     throw new Error('No response body');
@@ -76,6 +85,14 @@ export async function listDocuments(user_id = 1) {
   const response = await fetch(`${API_BASE}/documents?user_id=${user_id}`);
   if (!response.ok) {
     throw new Error(`Failed to load documents: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function getDocumentCategories(user_id = 1) {
+  const response = await fetch(`${API_BASE}/documents/categories?user_id=${user_id}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load document categories: ${response.status}`);
   }
   return response.json();
 }

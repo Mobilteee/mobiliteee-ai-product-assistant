@@ -101,6 +101,7 @@ DEFAULT_CHILD_CHUNK_SIZE = 300
 DEFAULT_CHUNK_OVERLAP = 60
 RRF_K = 60
 DEFAULT_REFUSAL_THRESHOLD = 0.10
+MAX_GENERATE_TOKENS = 800
 
 STRATEGY_NAIVE = "naive"
 STRATEGY_HYBRID = "hybrid"
@@ -381,6 +382,25 @@ def load_kb(data_dir: Path, user_id: int, doc_ids: list[int] | None = None) -> d
         return {"mode": "keyword", "chunks": []}
 
 
+def category_for_filename(filename: str) -> str:
+    """Map a document filename to a topic category for scope filtering.
+
+    Order matters: architecture keywords first, then AI-customer-service (客服),
+    then e-commerce after-sales/fulfilment, then generic product material. Files
+    that match nothing keep the 'default' bucket. Edit here to adjust taxonomy.
+    """
+    n = filename.lower()
+    if any(k in n for k in ("saas", "multi-tenant", "多租户", "rbac", "权限架构", "权限体系")):
+        return "架构权限"
+    if any(k in n for k in ("智能客服", "对话系统", "對話系統", "客服")):
+        return "智能客服"
+    if any(k in n for k in ("电商", "售后", "退款", "履约", "翻新", "质保", "质保")):
+        return "电商售后"
+    if any(k in n for k in ("面试知识", "知识库", "会员", "运营")):
+        return "产品综合"
+    return "default"
+
+
 def ensure_seed_kb(data_dir: Path, user_id: int, source_dir: Path) -> dict:
     from core.storage import get_all_chunks_for_user, init_db
 
@@ -393,15 +413,18 @@ def ensure_seed_kb(data_dir: Path, user_id: int, source_dir: Path) -> dict:
             return {"status": "skipped", "mode": "vector" if has_embedding else "keyword", "total_chunks": leaf_count}
     except Exception:
         pass
-    documents = [
-        (file_path.name, file_path.read_bytes())
-        for file_path in sorted(source_dir.glob("*.md"))
-        if file_path.is_file()
-    ]
-    if not documents:
+    doc_files = sorted(source_dir.glob("*.md"))
+    docs = [(p.name, p.read_bytes()) for p in doc_files if p.is_file()]
+    if not docs:
         return {"status": "no-source-docs", "mode": "keyword", "total_chunks": 0}
-    result = add_documents(data_dir, user_id, documents)
-    return {"status": "seeded", "mode": result["mode"], "total_chunks": result["total_chunks"]}
+    mode = "keyword"
+    total = 0
+    for name, raw in docs:
+        result = add_documents(data_dir, user_id, [(name, raw)], category=category_for_filename(name))
+        total += result["total_chunks"]
+        if result.get("mode") == "vector":
+            mode = "vector"
+    return {"status": "seeded", "mode": mode, "total_chunks": total}
 
 
 def add_documents(
@@ -847,7 +870,7 @@ def answer(
             "content": f"References:\n{context}\n\nQuestion: {question.strip()}{_LANG_ANCHOR}",
         }
     )
-    completion = _chat_create(messages, api_key=api_key, base_url=base_url, model=model, temperature=0.2)
+    completion = _chat_create(messages, api_key=api_key, base_url=base_url, model=model, temperature=0.2, max_tokens=MAX_GENERATE_TOKENS)
     result_text = completion.choices[0].message.content or ""
     return {
         "answer": result_text,
@@ -922,7 +945,7 @@ def stream_answer(
 
     total_tokens = 0
     try:
-        stream = _chat_create(messages, api_key=api_key, base_url=base_url, model=model, stream=True, temperature=0.2)
+        stream = _chat_create(messages, api_key=api_key, base_url=base_url, model=model, stream=True, temperature=0.2, max_tokens=MAX_GENERATE_TOKENS)
         for chunk in stream:
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta and delta.content:
