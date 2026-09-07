@@ -1,0 +1,50 @@
+# Render Blueprint — AI RAG backend (Docker web service)
+# Docs: https://render.com/docs/blueprint-spec
+# Applies when you do "New + -> Blueprint" and point at this repo, or paste
+# this file on the Render dashboard.
+services:
+  - type: web
+    name: ai-rag-backend
+    runtime: docker
+    plan: starter           # free works for light demo traffic; starter gives longer uptime
+    region: singapore       # pick the region closest to your visitors
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+
+    # Persistent disk for SQLite (uploads/history survive restarts). If you later
+    # move to Supabase/Postgres you can drop this disk (see docs/SUPABASE_DEPLOY.md).
+    disk:
+      name: rag-data
+      mountPath: /app/data
+      sizeGB: 1
+
+    envVars:
+      - key: DATA_DIR
+        value: /app/data
+      - key: CORS_ORIGINS
+        value: https://your-app.netlify.app   # <- replace with your real frontend origin
+      - key: RETRIEVAL_STRATEGY
+        value: hybrid_parent_child
+      - key: RATE_LIMIT_GLOBAL_PER_MIN
+        value: "8"
+      - key: RATE_LIMIT_IP_PER_HOUR
+        value: "8"
+
+      # Demo LLM credentials. Set values here OR mark sync:false and fill the
+      # secret in the Render dashboard (recommended so keys never sit in git).
+      - key: DEMO_CHAT_API_KEY
+        sync: false
+      - key: DEMO_CHAT_BASE_URL
+        value: https://api.deepseek.com
+      - key: DEMO_CHAT_MODEL
+        value: deepseek-v4-flash   # use a model your gateway actually accepts
+
+      # Optional embedding (leave unset to stay lexical BM25)
+      - key: DEMO_EMBED_API_KEY
+        sync: false
+      - key: DEMO_EMBED_BASE_URL
+        value: ""
+      - key: DEMO_EMBED_MODEL
+        value: ""
