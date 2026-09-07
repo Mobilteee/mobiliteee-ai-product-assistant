@@ -1,0 +1,66 @@
+{
+  "goldset_items": 78,
+  "mode": "lexical-only",
+  "unanchored_items": 0,
+  "block_items": 26,
+  "metrics": [
+    {
+      "strategy": "naive",
+      "n": 78,
+      "hit_at_1": 0.6154,
+      "hit_at_4": 0.8205,
+      "mrr": 0.6955,
+      "avg_top_score": 0.4346,
+      "avg_retrieve_ms": 10.11
+    },
+    {
+      "strategy": "hybrid",
+      "n": 78,
+      "hit_at_1": 0.7051,
+      "hit_at_4": 0.859,
+      "mrr": 0.7682,
+      "avg_top_score": 0.4335,
+      "avg_retrieve_ms": 25.36
+    },
+    {
+      "strategy": "hybrid_parent_child",
+      "n": 78,
+      "hit_at_1": 0.7308,
+      "hit_at_4": 0.8333,
+      "mrr": 0.7746,
+      "avg_top_score": 0.3939,
+      "avg_retrieve_ms": 32.23
+    }
+  ],
+  "metrics_block": [
+    {
+      "strategy": "naive",
+      "n": 26,
+      "hit_at_1": 0.6538,
+      "hit_at_4": 0.8462,
+      "mrr": 0.734,
+      "avg_top_score": 0.5222,
+      "avg_retrieve_ms": 10.23
+    },
+    {
+      "strategy": "hybrid",
+      "n": 26,
+      "hit_at_1": 0.6923,
+      "hit_at_4": 0.8846,
+      "mrr": 0.7692,
+      "avg_top_score": 0.5222,
+      "avg_retrieve_ms": 25.67
+    },
+    {
+      "strategy": "hybrid_parent_child",
+      "n": 26,
+      "hit_at_1": 0.7308,
+      "hit_at_4": 0.8846,
+      "mrr": 0.7981,
+      "avg_top_score": 0.4682,
+      "avg_retrieve_ms": 32.76
+    }
+  ],
+  "generation": null,
+  "note": "hit@1/hit@4/MRR are chunk-level: a hit is a top-K result landing on the keyword-anchored parent of the gold doc. metrics_block covers only items whose anchor is a proper subset of the doc's parents (true block-level targets). run mode: lexical-only. faithfulness/relevance/ttft need --judge."
+}
