@@ -29,8 +29,8 @@ evals/
 scripts/
 docs/
 
-# Scratch / notes / design system (kept out of the image)
-*.txt
+# Scratch / design system (kept out of the image). NOTE: do NOT add `*.txt`
+# here — it would also exclude requirements.txt from the Docker build context.
 *~
 *.log
 DESIGN_SYSTEMS.md
