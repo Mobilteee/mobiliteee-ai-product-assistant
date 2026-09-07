@@ -30,7 +30,7 @@ _pool = ThreadPoolExecutor(max_workers=2)
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT_DIR / "data"
+DATA_DIR = Path(os.getenv("DATA_DIR", str(ROOT_DIR / "data")))
 SEED_DIR = ROOT_DIR / "producttext"
 DEFAULT_USER_ID = 1
 ALLOWED_SUFFIXES = {".md", ".pdf", ".docx"}

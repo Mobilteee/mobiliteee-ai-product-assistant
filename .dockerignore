@@ -1,0 +1,36 @@
+# VCS / tooling
+.git
+.gitignore
+
+# Secrets (never baked into images)
+.env
+.env.local
+.env.*.local
+.streamlit/
+
+# Python
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Runtime data (bind/volume in prod, don't bake)
+data/
+*.db
+
+# Frontend is deployed separately (Vercel); not part of the backend image.
+frontend/
+node_modules/
+.next/
+
+# Tests / eval / docs helpers not needed at runtime
+tests/
+evals/
+scripts/
+docs/
+
+# Scratch / notes / design system (kept out of the image)
+*.txt
+*~
+*.log
+DESIGN_SYSTEMS.md
