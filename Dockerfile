@@ -3,6 +3,12 @@
 #
 # Build:      docker build -t ai-rag-backend .
 # Run:        docker run --rm -p 8000:8000 -v ai-rag-data:/app/data ai-rag-backend
+#
+# IMPORTANT (deploy platforms): the Docker build CONTEXT must be the repository
+# ROOT. This file, requirements.txt, backend/, core/ and producttext/ all live
+# at the root. On Railway set service "Root Directory" to empty (repo root) and
+# "Dockerfile Path" to ./Dockerfile — otherwise COPY requirements.txt fails with
+# "not found" because the context does not include the root directory.
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
