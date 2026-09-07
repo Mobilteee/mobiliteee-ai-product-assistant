@@ -526,6 +526,23 @@ export default function Home() {
   }
   const selectedCount = selectedDocIds.size
 
+  // Topic-scope filter: categories derived from each document's `category`.
+  const docCategories = Array.from(new Set((documents || []).map(d => d.category || 'default')))
+  const docsOfCategory = (c) => (documents || []).filter(d => (d.category || 'default') === c)
+  const isCatSelected = (c) => {
+    const ds = docsOfCategory(c)
+    return ds.length > 0 && ds.every(d => d.id != null && selectedDocIds.has(d.id))
+  }
+  const toggleCategory = (c) => {
+    const ids = docsOfCategory(c).map(d => d.id).filter(Boolean)
+    const on = isCatSelected(c)
+    setSelectedDocIds(prev => {
+      const next = new Set(prev)
+      ids.forEach(id => (on ? next.delete(id) : next.add(id)))
+      return next
+    })
+  }
+
   return (
     <div className="flex h-screen bg-gray-50">
 
@@ -558,6 +575,35 @@ export default function Home() {
             <button type="button" onClick={() => setSelectedDocIds(new Set(documents.map(d => d.id).filter(Boolean)))} className="text-blue-600 hover:underline">{t(lang, 'selectAll')}</button>
             <button type="button" onClick={() => setSelectedDocIds(new Set())} className="text-gray-500 hover:underline">{t(lang, 'clearSelection')}</button>
             <span className="ml-auto text-gray-400">{t(lang, 'selectedCount', { n: selectedCount })}</span>
+          </div>
+        )}
+
+        {docCategories.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSelectedDocIds(new Set())}
+              className={selectedCount === 0
+                ? 'rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700'
+                : 'rounded-full border border-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:border-blue-300 hover:text-blue-600'}
+            >
+              {t(lang, 'categoryAll')}
+            </button>
+            {docCategories.map(c => {
+              const on = isCatSelected(c)
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => toggleCategory(c)}
+                  className={on
+                    ? 'rounded-full border border-blue-600 bg-blue-600 px-2 py-0.5 text-[11px] font-medium text-white'
+                    : 'rounded-full border border-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:border-blue-300 hover:text-blue-600'}
+                >
+                  {c === 'default' ? t(lang, 'categoryDefault') : c}
+                </button>
+              )
+            })}
           </div>
         )}
 

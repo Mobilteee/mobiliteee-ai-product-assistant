@@ -46,6 +46,7 @@ def init_db(data_dir: Path) -> Path:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 filename TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'default',
                 status TEXT NOT NULL DEFAULT 'pending',
                 chunk_count INTEGER NOT NULL DEFAULT 0,
                 created_at REAL NOT NULL,
@@ -92,6 +93,12 @@ def init_db(data_dir: Path) -> Path:
             pass
         try:
             conn.execute("ALTER TABLE messages ADD COLUMN latency_meta TEXT")
+        except Exception:
+            pass
+        try:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(documents)").fetchall()}
+            if "category" not in cols:
+                conn.execute("ALTER TABLE documents ADD COLUMN category TEXT NOT NULL DEFAULT 'default'")
         except Exception:
             pass
     return db_path
@@ -272,11 +279,12 @@ def get_conversation_title(db_path: Path, conversation_id: int) -> str:
 import json as _json
 
 
-def create_document(db_path: Path, user_id: int, filename: str) -> int:
+def create_document(db_path: Path, user_id: int, filename: str, category: str = "default") -> int:
     with _connect(db_path) as conn:
         cur = conn.execute(
-            "INSERT INTO documents (user_id, filename, status, chunk_count, created_at) VALUES (?, ?, 'parsing', 0, ?)",
-            (user_id, filename, time.time()),
+            "INSERT INTO documents (user_id, filename, category, status, chunk_count, created_at) "
+            "VALUES (?, ?, ?, 'parsing', 0, ?)",
+            (user_id, filename, category or "default", time.time()),
         )
         return cur.lastrowid
 
@@ -293,7 +301,7 @@ def list_documents_by_user(db_path: Path, user_id: int) -> list[dict]:
     """List documents deduplicated by filename (keep newest per filename)."""
     with _connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT id, user_id, filename, status, chunk_count, created_at FROM documents WHERE user_id = ? ORDER BY created_at DESC",
+            "SELECT id, user_id, filename, category, status, chunk_count, created_at FROM documents WHERE user_id = ? ORDER BY created_at DESC",
             (user_id,),
         ).fetchall()
     seen: dict[str, dict] = {}
@@ -304,6 +312,7 @@ def list_documents_by_user(db_path: Path, user_id: int) -> list[dict]:
                 "id": r["id"],
                 "user_id": r["user_id"],
                 "filename": fn,
+                "category": r["category"],
                 "status": r["status"],
                 "chunk_count": r["chunk_count"],
                 "created_at": r["created_at"],
@@ -340,7 +349,7 @@ def get_chunks_by_doc_ids(db_path: Path, doc_ids: list[int]) -> list[dict]:
     placeholders = ",".join("?" for _ in doc_ids)
     with _connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT c.id, c.doc_id, c.parent_id, c.seq, c.text, c.embedding, d.filename "
+            "SELECT c.id, c.doc_id, c.parent_id, c.seq, c.text, c.embedding, d.filename, d.category "
             "FROM chunks c JOIN documents d ON c.doc_id = d.id "
             f"WHERE c.doc_id IN ({placeholders}) ORDER BY c.doc_id, c.seq",
             doc_ids,
@@ -354,6 +363,7 @@ def get_chunks_by_doc_ids(db_path: Path, doc_ids: list[int]) -> list[dict]:
             "text": r["text"],
             "embedding": _json.loads(r["embedding"]) if r["embedding"] else None,
             "filename": r["filename"],
+            "category": r["category"] or "default",
         }
         for r in rows
     ]
@@ -362,7 +372,7 @@ def get_chunks_by_doc_ids(db_path: Path, doc_ids: list[int]) -> list[dict]:
 def get_all_chunks_for_user(db_path: Path, user_id: int) -> list[dict]:
     with _connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT c.id, c.doc_id, c.parent_id, c.seq, c.text, c.embedding, d.filename "
+            "SELECT c.id, c.doc_id, c.parent_id, c.seq, c.text, c.embedding, d.filename, d.category "
             "FROM chunks c JOIN documents d ON c.doc_id = d.id "
             "WHERE d.user_id = ? ORDER BY c.doc_id, c.seq",
             (user_id,),
@@ -376,6 +386,7 @@ def get_all_chunks_for_user(db_path: Path, user_id: int) -> list[dict]:
             "text": r["text"],
             "embedding": _json.loads(r["embedding"]) if r["embedding"] else None,
             "filename": r["filename"],
+            "category": r["category"] or "default",
         }
         for r in rows
     ]

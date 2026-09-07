@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -90,7 +90,8 @@ def _db_path() -> Path:
 
 
 def _process_upload_task(task_id: str, data_dir: Path, user_id: int,
-                          files: list, embed_model: str, embed_api_key: str,
+                          files: list, category: str,
+                          embed_model: str, embed_api_key: str,
                           embed_base_url: str) -> None:
     """Background task: parse files, create chunks, update status."""
     try:
@@ -98,6 +99,7 @@ def _process_upload_task(task_id: str, data_dir: Path, user_id: int,
         _tasks[task_id]["progress"] = "Parsing documents..."
         result = add_documents(
             data_dir, user_id, files,
+            category=category,
             embed_model=embed_model,
             embed_api_key=embed_api_key,
             embed_base_url=embed_base_url,
@@ -154,6 +156,24 @@ async def documents(user_id: int = DEFAULT_USER_ID):
     return list_documents(DATA_DIR, user_id)
 
 
+@app.get("/documents/categories")
+async def document_categories(user_id: int = DEFAULT_USER_ID):
+    """Return all topic categories with the documents under each (scope filter UI)."""
+    from core import storage as storage_mod
+
+    docs = storage_mod.list_documents_by_user(_db_path(), user_id)
+    grouped: dict[str, list] = {}
+    for d in docs:
+        grouped.setdefault(d.get("category") or "default", []).append(d)
+    return {
+        "categories": [
+            {"category": c, "documents": items}
+            for c, items in sorted(grouped.items())
+        ],
+        "total": len(docs),
+    }
+
+
 @app.get("/documents/{doc_id}/content")
 async def document_content(doc_id: int, user_id: int = DEFAULT_USER_ID):
     """Return reconstructed full text of a document for the viewer."""
@@ -164,7 +184,11 @@ async def document_content(doc_id: int, user_id: int = DEFAULT_USER_ID):
 
 
 @app.post("/documents/upload")
-async def upload_documents(files: list[UploadFile] = File(...), user_id: int = DEFAULT_USER_ID):
+async def upload_documents(
+    files: list[UploadFile] = File(...),
+    user_id: int = DEFAULT_USER_ID,
+    category: str = Form("default"),
+):
     """Upload documents — returns task_id immediately, processes in background."""
     parsed_files = []
     for uploaded in files:
@@ -175,6 +199,7 @@ async def upload_documents(files: list[UploadFile] = File(...), user_id: int = D
         parsed_files.append((uploaded.filename, raw))
     if not parsed_files:
         raise HTTPException(status_code=400, detail="No files provided")
+    category = (category or "default").strip() or "default"
 
     task_id = str(uuid.uuid4())
     _tasks[task_id] = {"status": "pending", "progress": "Queued..."}
@@ -183,7 +208,7 @@ async def upload_documents(files: list[UploadFile] = File(...), user_id: int = D
     loop.run_in_executor(
         _pool,
         _process_upload_task,
-        task_id, DATA_DIR, user_id, parsed_files,
+        task_id, DATA_DIR, user_id, parsed_files, category,
         _env("DEMO_EMBED_MODEL"), _env("DEMO_EMBED_API_KEY"), _env("DEMO_EMBED_BASE_URL"),
     )
 
@@ -298,6 +323,8 @@ async def query(request: Request):
     data_dir = Path(data.get("data_dir", DATA_DIR))
     user_id = int(data.get("user_id", DEFAULT_USER_ID))
     doc_ids = data.get("doc_ids")  # optional list[int] for document filtering
+    raw_categories = data.get("categories")  # optional list[str] topic-scope filter
+    categories = [c for c in (raw_categories or []) if isinstance(c, str) and c.strip()] or None
     strategy = data.get("strategy") or os.getenv("RETRIEVAL_STRATEGY", DEFAULT_STRATEGY)
     preset = data.get("preset")
     if strategy not in RETRIEVAL_STRATEGIES:
@@ -359,6 +386,8 @@ async def query(request: Request):
                 embed_base_url=embed_base_url,
                 strategy=strategy,
                 preset=preset,
+                categories=categories,
+                doc_ids=doc_ids,
             ):
                 event_type = event["event"]
                 if event_type == "token":

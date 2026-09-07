@@ -328,6 +328,7 @@ def _chunk_from_db_row(r: dict, parent_by_id: dict) -> dict:
             "parent_id": None,
             "seq": r["seq"],
             "filename": filename,
+            "category": r.get("category") or "default",
             "source": f"{filename} #{r['seq']}",
             "text": r["text"],
             "parent_text": r["text"],
@@ -343,6 +344,7 @@ def _chunk_from_db_row(r: dict, parent_by_id: dict) -> dict:
         "parent_id": r["parent_id"],
         "seq": r["seq"],
         "filename": filename,
+        "category": r.get("category") or "default",
         "source": f"{filename} #{parent_seq}.{r['seq']}",
         "text": r["text"],
         "parent_text": parent_text,
@@ -409,6 +411,7 @@ def add_documents(
     embed_model: str = "",
     embed_api_key: str = "",
     embed_base_url: str = "",
+    category: str = "default",
     strategy: str = DEFAULT_STRATEGY,
 ) -> dict:
     from core.storage import (
@@ -442,7 +445,7 @@ def add_documents(
             all_texts.extend(child["text"] for child in parent_row["children"])
 
         delete_documents_by_filename(db_path, user_id, file_name)
-        doc_id = create_document(db_path, user_id, file_name)
+        doc_id = create_document(db_path, user_id, file_name, category=category)
 
         if embed_model and embed_api_key:
             try:
@@ -481,14 +484,14 @@ def list_documents(data_dir: Path, user_id: int) -> dict:
             has_any_embedding = any(r.get("embedding") for r in all_chunks)
             mode = "vector" if has_any_embedding else "keyword"
             total_chunks = sum(d["chunk_count"] for d in docs)
-            return {"documents": [{"id": d["id"], "filename": d["filename"], "chunk_count": d["chunk_count"], "status": d["status"], "created_at": d["created_at"]} for d in docs], "total_chunks": total_chunks, "mode": mode}
+            return {"documents": [{"id": d["id"], "filename": d["filename"], "category": d.get("category", "default"), "chunk_count": d["chunk_count"], "status": d["status"], "created_at": d["created_at"]} for d in docs], "total_chunks": total_chunks, "mode": mode}
         except Exception:
             pass
     kb = load_kb(data_dir, user_id)
     grouped: dict = {}
     for chunk in kb["chunks"]:
         doc_name = chunk["source"].rsplit(" #", 1)[0]
-        entry = grouped.setdefault(doc_name, {"filename": doc_name, "chunk_count": 0, "status": "ready"})
+        entry = grouped.setdefault(doc_name, {"filename": doc_name, "category": "default", "chunk_count": 0, "status": "ready"})
         entry["chunk_count"] += 1
     return {"documents": sorted(grouped.values(), key=lambda item: item["filename"]), "total_chunks": len(kb["chunks"]), "mode": kb["mode"]}
 
@@ -637,6 +640,7 @@ def retrieve(
     embed_base_url: str = "",
     top_k: int = 4,
     doc_ids: list[int] | None = None,
+    categories: list[str] | None = None,
     strategy: str | None = None,
     translated_query: str | None = None,
 ) -> list[dict]:
@@ -652,6 +656,13 @@ def retrieve(
         filtered = [c for c in chunks if c.get("doc_id") in doc_ids]
         if filtered:
             chunks = filtered
+
+    # Topic-scope pre-filtering: restrict the candidate pool BEFORE any similarity
+    # scoring, so both dense and sparse retrieval rank only inside the requested
+    # categories/docs and never leak cross-domain noise.
+    if categories:
+        catset = set(categories)
+        chunks = [c for c in chunks if (c.get("category") or "default") in catset]
 
     if strategy == STRATEGY_PARENT_CHILD:
         candidates = [c for c in chunks if c.get("is_parent") is False]
@@ -791,6 +802,8 @@ def answer(
     embed_api_key: str = "",
     embed_base_url: str = "",
     strategy: str | None = None,
+    categories: list[str] | None = None,
+    doc_ids: list[int] | None = None,
 ) -> dict:
     chunks = kb.get("chunks", [])
     if not chunks:
@@ -802,7 +815,7 @@ def answer(
     hits = retrieve(
         question, kb, api_key, base_url,
         embed_model, embed_api_key, embed_base_url,
-        doc_ids=None, strategy=strategy,
+        doc_ids=doc_ids, categories=categories, strategy=strategy,
     )
     if not hits or max(h["score"] for h in hits) < DEFAULT_REFUSAL_THRESHOLD:
         _, retrieval_q, was = _translate_query_if_needed(question, api_key=api_key, base_url=base_url, model=model)
@@ -810,7 +823,7 @@ def answer(
             hits = retrieve(
                 retrieval_q, kb, api_key, base_url,
                 embed_model, embed_api_key, embed_base_url,
-                doc_ids=None, strategy=strategy,
+                doc_ids=doc_ids, categories=categories, strategy=strategy,
             )
     if not hits or max(h["score"] for h in hits) < DEFAULT_REFUSAL_THRESHOLD:
         raise ValueError(_refusal_message())
@@ -857,6 +870,8 @@ def stream_answer(
     embed_base_url: str = "",
     strategy: str | None = None,
     preset: str | None = None,
+    categories: list[str] | None = None,
+    doc_ids: list[int] | None = None,
 ):
     """Generator yielding SSE event dicts: sources, token, refusal/error, done."""
     chunks = kb.get("chunks", [])
@@ -872,7 +887,7 @@ def stream_answer(
         hits = retrieve(
             question, kb, api_key, base_url,
             embed_model, embed_api_key, embed_base_url,
-            strategy=strategy,
+            doc_ids=doc_ids, categories=categories, strategy=strategy,
         )
         if not hits or max(h["score"] for h in hits) < DEFAULT_REFUSAL_THRESHOLD:
             _, retrieval_q, was = _translate_query_if_needed(question, api_key=api_key, base_url=base_url, model=model)
