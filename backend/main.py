@@ -498,6 +498,7 @@ async def query(request: Request):
     categories = [c for c in (raw_categories or []) if isinstance(c, str) and c.strip()] or None
     strategy = data.get("strategy") or os.getenv("RETRIEVAL_STRATEGY", DEFAULT_STRATEGY)
     preset = data.get("preset")
+    language = data.get("language")  # optional "zh"/"en"; else inferred from the question
     if strategy not in RETRIEVAL_STRATEGIES:
         strategy = os.getenv("RETRIEVAL_STRATEGY", DEFAULT_STRATEGY)
     if preset not in PROMPT_TEMPLATES:
@@ -616,6 +617,7 @@ async def query(request: Request):
                 preset=preset,
                 categories=categories,
                 doc_ids=doc_ids,
+                language=language,
             ):
                 event_type = event["event"]
                 if event_type == "token":

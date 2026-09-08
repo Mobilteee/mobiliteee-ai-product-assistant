@@ -794,24 +794,49 @@ def _translation_rescue_enabled() -> bool:
             not in ("0", "false", "off", "no"))
 
 
-# Zero-cost language anchor appended to the final user turn: the answer language
-# follows the question, not the references. Keeps generation to a single LLM call.
-_LANG_ANCHOR = "\n\nPlease answer in English if the user asked in English, or Chinese if asked in Chinese."
+# Zero-cost language control: a strong, language-specific rule is appended at the
+# END of both the system prompt and the final user turn, so the answer language
+# follows the question — never the (possibly Chinese) references. Keeps generation
+# to a single LLM call.
+_LANG_RULE_ZH = (
+    "\n\n重要规则：必须使用与用户提问相同的语言进行回答。"
+    "如果用户提问为中文，必须全程使用流畅的简体中文作答"
+    "（专业名词可保留英文括号标注）。"
+)
+_LANG_RULE_EN = (
+    "\n\nIMPORTANT: You must answer in English, the exact same language as the "
+    "user's question. Do not switch to Chinese."
+)
+
+
+def _lang_rule(lang: str) -> str:
+    return _LANG_RULE_ZH if lang == "zh" else _LANG_RULE_EN
+
+
+def _infer_lang(question: str, language: str | None = None) -> str:
+    """Resolve the answer language: explicit param wins, else detect from the
+    question text, else default to Chinese (this product's primary audience)."""
+    if language in ("zh", "en"):
+        return language
+    return "zh" if _is_mostly_chinese(question) else "en"
 
 
 # ---- Answer generation ---------------------------------------------------------
 
 
-def _system_content(preset: str | None = None) -> str:
-    if preset and preset in PROMPT_TEMPLATES:
-        return PROMPT_TEMPLATES[preset]["system"] + _LANG_INSTRUCTION
-    return (
-        "You are a senior AI product coach. Answer strictly from the references. "
-        "Formatting rules: never stack citations (only cite the most direct single reference per point as [N]); "
-        "avoid emoji in normal text; put conclusions in bold, technical fields in backticks, edge conditions in italics; "
-        "say clearly when information is not present instead of guessing.\n\n"
-        "References are numbered [1], [2], ... in the order provided."
-    ) + _LANG_INSTRUCTION
+def _system_content(preset: str | None = None, lang: str = "zh") -> str:
+    base = (
+        PROMPT_TEMPLATES[preset]["system"]
+        if (preset and preset in PROMPT_TEMPLATES)
+        else (
+            "You are a senior AI product coach. Answer strictly from the references. "
+            "Formatting rules: never stack citations (only cite the most direct single reference per point as [N]); "
+            "avoid emoji in normal text; put conclusions in bold, technical fields in backticks, edge conditions in italics; "
+            "say clearly when information is not present instead of guessing.\n\n"
+            "References are numbered [1], [2], ... in the order provided."
+        )
+    )
+    return base + _LANG_INSTRUCTION + _lang_rule(lang)
 
 
 def answer(
@@ -827,10 +852,13 @@ def answer(
     strategy: str | None = None,
     categories: list[str] | None = None,
     doc_ids: list[int] | None = None,
+    language: str | None = None,
 ) -> dict:
     chunks = kb.get("chunks", [])
     if not chunks:
         raise ValueError("Knowledge base is empty. Please upload and parse a document first.")
+
+    lang = _infer_lang(question, language)
 
     # Lazy cross-lingual: try the original question first (a multilingual embedding
     # model can already recall Chinese chunks). Only when recall is empty/weak AND the
@@ -859,7 +887,7 @@ def answer(
                 "You are a senior AI product coach. Answer strictly from the references. "
                 "Cite [Source N]. If information is not present, say so clearly. "
                 "Answer in the exact same language as the user's original query."
-            ),
+            ) + _lang_rule(lang),
         }
     ]
     if history:
@@ -867,7 +895,7 @@ def answer(
     messages.append(
         {
             "role": "user",
-            "content": f"References:\n{context}\n\nQuestion: {question.strip()}{_LANG_ANCHOR}",
+            "content": f"References:\n{context}\n\nQuestion: {question.strip()}{_lang_rule(lang)}",
         }
     )
     completion = _chat_create(messages, api_key=api_key, base_url=base_url, model=model, temperature=0.2, max_tokens=MAX_GENERATE_TOKENS)
@@ -895,12 +923,15 @@ def stream_answer(
     preset: str | None = None,
     categories: list[str] | None = None,
     doc_ids: list[int] | None = None,
+    language: str | None = None,
 ):
     """Generator yielding SSE event dicts: sources, token, refusal/error, done."""
     chunks = kb.get("chunks", [])
     if not chunks:
         yield {"event": "error", "data": "Knowledge base is empty. Please upload and parse a document first."}
         return
+
+    lang = _infer_lang(question, language)
 
     t0 = time.time()
     try:
@@ -937,11 +968,11 @@ def stream_answer(
     yield {"event": "sources", "data": json.dumps(sources_data, ensure_ascii=False)}
 
     context = "\n\n".join([f"[Source {i + 1}: {h['source']}]\n{h['text']}" for i, h in enumerate(hits)])
-    system = _system_content(preset)
+    system = _system_content(preset, lang)
     messages = [{"role": "system", "content": system}]
     if history:
         messages.extend(history[-6:])
-    messages.append({"role": "user", "content": "References:\n" + context + "\n\nQuestion: " + question.strip() + _LANG_ANCHOR})
+    messages.append({"role": "user", "content": "References:\n" + context + "\n\nQuestion: " + question.strip() + _lang_rule(lang)})
 
     total_tokens = 0
     try:
