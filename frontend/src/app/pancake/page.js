@@ -35,14 +35,18 @@ const STORAGE_KEYS = {
 
 const newMsgId = () => 'm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
 
-function hashUserId(name) {
-  const n = (name || '').trim();
-  if (!n || n === 'Guest_01') return 1;
-  let h = 0;
-  for (let i = 0; i < n.length; i++) {
-    h = ((h << 5) - h + n.charCodeAt(i)) | 0;
+function getOrCreateVisitorId() {
+  if (typeof window === 'undefined') return 'guest_' + Math.random().toString(36).slice(2, 10);
+  try {
+    let id = window.localStorage.getItem('rag_visitor_id');
+    if (!id) {
+      id = 'guest_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+      window.localStorage.setItem('rag_visitor_id', id);
+    }
+    return id;
+  } catch (err) {
+    return 'guest_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   }
-  return (Math.abs(h) % 2147483000) + 1001;
 }
 
 function readLocal(key, fallback) {
@@ -59,12 +63,13 @@ function writeLocal(key, value) {
 }
 
 function defaultProfile() {
+  const visitorId = getOrCreateVisitorId();
   const saved = readLocal(STORAGE_KEYS.profile, null);
   if (saved && typeof saved === 'object' && saved.name) {
     const name = saved.name.trim() || 'Guest_01';
-    return { name, userId: Number(saved.userId) || hashUserId(name), apiKey: saved.apiKey || '', baseUrl: saved.baseUrl || '', model: saved.model || '' };
+    return { name, userId: visitorId, apiKey: saved.apiKey || '', baseUrl: saved.baseUrl || '', model: saved.model || '' };
   }
-  return { name: 'Guest_01', userId: 1, apiKey: '', baseUrl: '', model: '' };
+  return { name: 'Guest_01', userId: visitorId, apiKey: '', baseUrl: '', model: '' };
 }
 
 export default function Home() {
@@ -320,7 +325,7 @@ export default function Home() {
     const name = (profileDraft?.name || '').trim() || 'Guest_01'
     const next = {
       name,
-      userId: name === 'Guest_01' ? 1 : hashUserId(name),
+      userId: profile.userId || getOrCreateVisitorId(),
       apiKey: (profileDraft?.apiKey || '').trim(),
       baseUrl: (profileDraft?.baseUrl || '').trim(),
       model: (profileDraft?.model || '').trim(),
@@ -332,7 +337,7 @@ export default function Home() {
   }
 
   const resetProfile = () => {
-    const next = { name: 'Guest_01', userId: 1, apiKey: '', baseUrl: '', model: '' }
+    const next = { name: 'Guest_01', userId: profile.userId || getOrCreateVisitorId(), apiKey: '', baseUrl: '', model: '' }
     setProfile(next)
     writeLocal(STORAGE_KEYS.profile, next)
     setProfileOpen(false)

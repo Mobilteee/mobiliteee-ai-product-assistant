@@ -89,7 +89,31 @@ def _db_path() -> Path:
     return init_db(DATA_DIR)
 
 
-def _process_upload_task(task_id: str, data_dir: Path, user_id: int,
+def _visitor_id(value) -> str:
+    """Return a stable, sanitized guest identifier (string).
+
+    The frontend sends a per-browser visitor_id; non-browser callers that omit
+    it get a fresh ``guest_*`` id so they are isolated too. This replaces the
+    old shared ``user_id=1`` — no login required.
+    """
+    v = str(value or "").strip() if value is not None else ""
+    if v:
+        return v[:64]
+    return "guest_" + uuid.uuid4().hex[:12]
+
+
+def _ensure_demo_seed(uid: str) -> None:
+    """Lazily seed the demo corpus for a visitor so a brand-new guest still sees
+    the producttext knowledge base (an isolated copy) instead of an empty KB."""
+    try:
+        from core.storage import get_all_chunks_for_user
+        if not get_all_chunks_for_user(_db_path(), uid):
+            ensure_seed_kb(DATA_DIR, uid, SEED_DIR)
+    except Exception:
+        pass
+
+
+def _process_upload_task(task_id: str, data_dir: Path, user_id: str,
                           files: list, category: str,
                           embed_model: str, embed_api_key: str,
                           embed_base_url: str) -> None:
@@ -323,16 +347,20 @@ async def health():
 
 
 @app.get("/documents")
-async def documents(user_id: int = DEFAULT_USER_ID):
-    return list_documents(DATA_DIR, user_id)
+async def documents(user_id: str = ""):
+    uid = _visitor_id(user_id)
+    _ensure_demo_seed(uid)
+    return list_documents(DATA_DIR, uid)
 
 
 @app.get("/documents/categories")
-async def document_categories(user_id: int = DEFAULT_USER_ID):
+async def document_categories(user_id: str = ""):
     """Return all topic categories with the documents under each (scope filter UI)."""
     from core import storage as storage_mod
 
-    docs = storage_mod.list_documents_by_user(_db_path(), user_id)
+    uid = _visitor_id(user_id)
+    _ensure_demo_seed(uid)
+    docs = storage_mod.list_documents_by_user(_db_path(), uid)
     grouped: dict[str, list] = {}
     for d in docs:
         grouped.setdefault(d.get("category") or "default", []).append(d)
@@ -346,10 +374,10 @@ async def document_categories(user_id: int = DEFAULT_USER_ID):
 
 
 @app.get("/documents/{doc_id}/content")
-async def document_content(doc_id: int, user_id: int = DEFAULT_USER_ID):
+async def document_content(doc_id: int, user_id: str = ""):
     """Return reconstructed full text of a document for the viewer."""
     try:
-        return get_document_content(DATA_DIR, user_id, doc_id)
+        return get_document_content(DATA_DIR, _visitor_id(user_id), doc_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -357,10 +385,11 @@ async def document_content(doc_id: int, user_id: int = DEFAULT_USER_ID):
 @app.post("/documents/upload")
 async def upload_documents(
     files: list[UploadFile] = File(...),
-    user_id: int = DEFAULT_USER_ID,
+    user_id: str = "",
     category: str = Form("default"),
 ):
     """Upload documents — returns task_id immediately, processes in background."""
+    uid = _visitor_id(user_id)
     parsed_files = []
     for uploaded in files:
         suffix = Path(uploaded.filename or "").suffix.lower()
@@ -379,7 +408,7 @@ async def upload_documents(
     loop.run_in_executor(
         _pool,
         _process_upload_task,
-        task_id, DATA_DIR, user_id, parsed_files, category,
+        task_id, DATA_DIR, uid, parsed_files, category,
         _env("DEMO_EMBED_MODEL"), _env("DEMO_EMBED_API_KEY"), _env("DEMO_EMBED_BASE_URL"),
     )
 
@@ -409,11 +438,11 @@ async def retrieval_config():
 
 
 @app.get("/metrics/overview")
-async def metrics_overview(user_id: int = DEFAULT_USER_ID):
+async def metrics_overview(user_id: str = ""):
     """Aggregate feedback, query metrics, and eval results for the dashboard."""
     from core import storage as storage_mod
 
-    overview = storage_mod.metrics_overview(_db_path(), user_id)
+    overview = storage_mod.metrics_overview(_db_path(), _visitor_id(user_id))
     eval_file = ROOT_DIR / "evals" / "EVAL_RESULTS.json"
     if eval_file.exists():
         overview["eval_results"] = json.loads(eval_file.read_text(encoding="utf-8"))
@@ -428,7 +457,7 @@ async def submit_feedback(request: Request):
     from core import storage as storage_mod
 
     data = await request.json()
-    user_id = int(data.get("user_id", DEFAULT_USER_ID))
+    user_id = _visitor_id(data.get("user_id"))
     thumbs = int(data.get("thumbs", 1))
     reasons = data.get("reasons") or []
     if not isinstance(reasons, list):
@@ -446,26 +475,27 @@ async def submit_feedback(request: Request):
 
 
 @app.get("/conversations")
-async def list_user_conversations(user_id: int = DEFAULT_USER_ID):
+async def list_user_conversations(user_id: str = ""):
     """Return current user's conversations, newest first."""
     from core import storage as storage_mod
-    return {"conversations": storage_mod.list_conversations(_db_path(), user_id)}
+    return {"conversations": storage_mod.list_conversations(_db_path(), _visitor_id(user_id))}
 
 
 @app.post("/conversations")
 async def create_conversation(request: Request):
     from core import storage as storage_mod
     data = await request.json()
-    user_id = int(data.get("user_id", DEFAULT_USER_ID))
+    user_id = _visitor_id(data.get("user_id"))
     title = str(data.get("title") or "").strip() or "新的会话"
     conv_id = storage_mod.create_conversation(_db_path(), user_id, title)
     return {"status": "ok", "conversation_id": conv_id, "title": title}
 
 
 @app.get("/conversations/{conversation_id}/messages")
-async def get_conversation_messages(conversation_id: int, user_id: int = DEFAULT_USER_ID):
+async def get_conversation_messages(conversation_id: int, user_id: str = ""):
     from core import storage as storage_mod
-    convs = storage_mod.list_conversations(_db_path(), user_id)
+    uid = _visitor_id(user_id)
+    convs = storage_mod.list_conversations(_db_path(), uid)
     if not any(c["id"] == conversation_id for c in convs):
         raise HTTPException(status_code=404, detail="Conversation not found")
     messages = storage_mod.list_messages(_db_path(), conversation_id)
@@ -473,9 +503,10 @@ async def get_conversation_messages(conversation_id: int, user_id: int = DEFAULT
 
 
 @app.delete("/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: int, user_id: int = DEFAULT_USER_ID):
+async def delete_conversation(conversation_id: int, user_id: str = ""):
     from core import storage as storage_mod
-    convs = storage_mod.list_conversations(_db_path(), user_id)
+    uid = _visitor_id(user_id)
+    convs = storage_mod.list_conversations(_db_path(), uid)
     if not any(c["id"] == conversation_id for c in convs):
         raise HTTPException(status_code=404, detail="Conversation not found")
     storage_mod.delete_conversation(_db_path(), conversation_id)
@@ -492,7 +523,8 @@ async def query(request: Request):
         return {"error": "question is required"}
 
     data_dir = Path(data.get("data_dir", DATA_DIR))
-    user_id = int(data.get("user_id", DEFAULT_USER_ID))
+    user_id = _visitor_id(data.get("user_id"))
+    _ensure_demo_seed(user_id)
     doc_ids = data.get("doc_ids")  # optional list[int] for document filtering
     raw_categories = data.get("categories")  # optional list[str] topic-scope filter
     categories = [c for c in (raw_categories or []) if isinstance(c, str) and c.strip()] or None
