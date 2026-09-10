@@ -1,0 +1,216 @@
+{
+  "known": [
+    {
+      "id": "eval-metric-families",
+      "q": "RAG 系统的核心评估指标分为哪两大类？",
+      "doc": "AI产品岗高频面试知识库.md",
+      "expected_points": [
+        "Retrieval Metrics（检索指标）",
+        "Generation Metrics（生成指标）"
+      ]
+    },
+    {
+      "id": "faithfulness-definition",
+      "q": "Faithfulness 指标最关心什么问题？",
+      "doc": "AI产品岗高频面试知识库.md",
+      "expected_points": [
+        "回答是否忠于检索上下文",
+        "是否出现幻觉或无依据内容"
+      ]
+    },
+    {
+      "id": "rag-traceability",
+      "q": "RAG 的可追溯性具体指什么？",
+      "doc": "AI产品岗高频面试知识库.md",
+      "expected_points": [
+        "答案能够引用来源",
+        "支持人工核验与溯源"
+      ]
+    },
+    {
+      "id": "prd-escalation-rate",
+      "q": "产品目标中人工转接率要降低多少？",
+      "doc": "电商智能客服RAG系统_PRD.md",
+      "expected_points": [
+        "人工转接率降低 40%"
+      ]
+    },
+    {
+      "id": "prd-ttft",
+      "q": "首字生成延迟 TTFT 的量化目标是多少？",
+      "doc": "电商智能客服RAG系统_PRD.md",
+      "expected_points": [
+        "TTFT 控制在 800ms 内"
+      ]
+    },
+    {
+      "id": "prd-resolution-rate",
+      "q": "单轮问题解决率的目标是多少？",
+      "doc": "电商智能客服RAG系统_PRD.md",
+      "expected_points": [
+        "单轮问题解决率达到 75%"
+      ]
+    },
+    {
+      "id": "prd-chunking",
+      "q": "文档切块的 Chunk Size 和 Overlap 分别是多少？",
+      "doc": "电商智能客服RAG系统_PRD.md",
+      "expected_points": [
+        "Chunk Size 为 600 tokens",
+        "Overlap 为 120 tokens"
+      ]
+    },
+    {
+      "id": "prd-hybrid-retrieval",
+      "q": "混合检索的两路召回分别是什么？",
+      "doc": "电商智能客服RAG系统_PRD.md",
+      "expected_points": [
+        "向量检索",
+        "BM25 / 倒排索引关键词检索"
+      ]
+    },
+    {
+      "id": "evolution-rule-flow",
+      "q": "规则引擎时代处理一条用户请求的核心工作流程分为哪几步？",
+      "doc": "万字拆解AI客服从规则引擎到Agent的演进实践.md",
+      "expected_points": [
+        "关键词匹配",
+        "决策树路由",
+        "知识库查询",
+        "模板填充"
+      ]
+    },
+    {
+      "id": "evolution-rag-flow",
+      "q": "RAG 技术缓解幻觉的完整流程包含哪些环节？",
+      "doc": "万字拆解AI客服从规则引擎到Agent的演进实践.md",
+      "expected_points": [
+        "文档向量化存储",
+        "检索阶段",
+        "重排序",
+        "生成阶段"
+      ]
+    },
+    {
+      "id": "evolution-agent-modules",
+      "q": "客服4.0的 AI Agent 由哪几个核心能力模块组成？",
+      "doc": "万字拆解AI客服从规则引擎到Agent的演进实践.md",
+      "expected_points": [
+        "感知模块",
+        "推理模块",
+        "记忆模块",
+        "行动模块"
+      ]
+    },
+    {
+      "id": "platform-kb-role",
+      "q": "知识库模块在智能客服平台中扮演什么角色？支持存储哪些类型的内容？",
+      "doc": "从需求到落地：手把手教你打造企业级-AI-智能客服平台，附实战案例.md",
+      "expected_points": [
+        "客服系统的记忆库",
+        "结构化数据与非结构化内容",
+        "支持动态维护"
+      ]
+    },
+    {
+      "id": "platform-human-ai",
+      "q": "在智能客服的用户业务流程中，人机协作处理阶段通常包含哪些环节？",
+      "doc": "从需求到落地：手把手教你打造企业级-AI-智能客服平台，附实战案例.md",
+      "expected_points": [
+        "承接 AI 交互上下文",
+        "人工处理后沉淀回知识库",
+        "必要时跨部门协作"
+      ]
+    },
+    {
+      "id": "saas-permission-types",
+      "q": "SaaS 系统的权限可以划分为哪两大类？分别靠什么机制实现？",
+      "doc": "SaaS平台权限架构.md",
+      "expected_points": [
+        "功能权限",
+        "数据权限",
+        "通常靠 RBAC 模型实现"
+      ]
+    },
+    {
+      "id": "saas-role-vs-user-group",
+      "q": "角色组与用户组在功能上有什么区别？",
+      "doc": "SaaS平台权限架构.md",
+      "expected_points": [
+        "角色组是多个角色的合集",
+        "用户组是多个账号的合集"
+      ]
+    },
+    {
+      "id": "membership-loop",
+      "q": "付费会员体系的产品闭环由哪几个关键场景构成？",
+      "doc": "从产品到运营，教你落地付费会员体系.md",
+      "expected_points": [
+        "权益清单",
+        "会员卡价格",
+        "会员落地页及运营承接"
+      ]
+    },
+    {
+      "id": "membership-loss-aversion",
+      "q": "文中用哪个消费行为学原理解释付费会员能让用户更活跃、更倾向回本？",
+      "doc": "从产品到运营，教你落地付费会员体系.md",
+      "expected_points": [
+        "损失厌恶",
+        "用户难以忍受会员权益没有收回成本",
+        "因此提高活跃与续费动机"
+      ]
+    },
+    {
+      "id": "electronics-three-risks",
+      "q": "文章指出电子产品电商市场背后暗藏哪三大核心风险？",
+      "doc": "电子产品电商风险分析：售后、质保、翻新，三大风险防范.md",
+      "expected_points": [
+        "售后服务不力",
+        "质保体系不完善",
+        "翻新产品混淆"
+      ]
+    },
+    {
+      "id": "electronics-refurb-control",
+      "q": "电商平台防范翻新产品风险的核心手段是什么？",
+      "doc": "电子产品电商风险分析：售后、质保、翻新，三大风险防范.md",
+      "expected_points": [
+        "商品溯源体系",
+        "进货审核机制",
+        "序列号追溯"
+      ]
+    },
+    {
+      "id": "data-tool-sla",
+      "q": "选型时售后 SLA 对工单首次响应和 P1 故障修复的建议阈值分别是什么？",
+      "doc": "电商数据工具的售后服务重要吗：选型与落地要点.md",
+      "expected_points": [
+        "工作时段工单首次响应 ≤30 分钟",
+        "P1 故障修复 ≤4 小时或给出绕行方案"
+      ]
+    }
+  ],
+  "negative": [
+    {
+      "id": "no-answer-mars",
+      "q": "火星基地的氧气循环系统维护周期是多少？",
+      "should_refuse": true
+    },
+    {
+      "id": "no-answer-penguin",
+      "q": "南极企鹅迁徙时如何规划补给站？",
+      "should_refuse": true
+    },
+    {
+      "id": "no-answer-whale",
+      "q": "鲸鱼牙齿矫正的医保报销比例是多少？",
+      "should_refuse": true
+    },
+    {
+      "id": "no-answer-banana",
+      "q": "怎样用香蕉皮给服务器主板散热？",
+      "should_refuse": true
+    }
+  ]
+}

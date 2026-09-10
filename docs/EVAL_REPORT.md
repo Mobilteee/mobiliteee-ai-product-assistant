@@ -1,17 +1,18 @@
-# RAG 检索评测报告（EVAL REPORT）
+# RAG 评测报告（EVAL REPORT）
 
 > 生成方式：`evals/run_eval.py`。原始数字源文件 `evals/EVAL_RESULTS.json` / `EVAL_RESULTS.md`
 > （看板 `/dashboard` 读取前者）。语料位于 `producttext/`。
-> 评测对象：AI 产品知识助手的检索链路。
+> 评测对象：AI 产品知识助手的检索与生成链路。
 
 ---
 
 ## 1. 目的与结论
 
-评测回答两个问题：
+评测回答三个问题：
 
 1. 不同检索策略（naive / hybrid / hybrid_parent_child）在同一份金标集上谁更准、快多少；
-2. 把“我做了混合检索 / 父子分块”从形容词变成**有数字支撑**的结论，并诚实标注跑分边界。
+2. 生成答案是否正确、是否有证据支撑、引用是否落到金标文档、无答案时是否拒答；
+3. 把“混合检索 / 父子分块 / 拒答护栏”从形容词变成**有数字支撑**的结论，并诚实标注跑分边界。
 
 **当前结论（10 文档语料，78 条手写金标，词法-only）：**
 
@@ -19,6 +20,9 @@
   - hit@1：naive 61.5% → hybrid 70.5% → parent_child 73.1%；
   - MRR：naive .696 → hybrid .768 → parent_child .775（在**块级锚点子集**上 pc 达 **.798**，naive .734）；
   - 即在“第一条引用就要命中”的对话体验指标上，父子分块显著领先 naive，BM25 混合次之。
+- **生成侧（24 条抽样，lexical-only 检索 + `hybrid_parent_child`）**：answer correctness **97.9%**、
+  faithfulness **84.5%**、answer relevance **100%**、citation accuracy **92.7%**、citation coverage **95%**、
+  refusal recall **100%**；4 道域外问题全部正确拒答，平均 TTFT 约 **1.67s**。
 - **局限（必须主动说明）**：本轮为 `lexical-only`（未配 embedding，向量路未参与）；parent_child 的
   子块召回 + 父上下文注入优势在配向量后预期进一步放大。另：当前 BM25 为全内存线性扫描
   （341 块，单次 ~25–32ms），语料再大需倒排索引/预计算。
@@ -62,10 +66,17 @@
 脚本检测 `DEMO_EMBED_MODEL / DEMO_EMBED_API_KEY`；存在则在入库阶段写真实向量、检索阶段传入，
 产物标注 `mode: embedding`；否则 `mode: lexical-only`。
 
-### 2.4 生成侧（可选 `--judge`）
+### 2.4 生成侧（`--judge`）
 
-用 chat 模型生成答案并让“评判模型”打分：`faithfulness`（无幻觉/忠实于检索上下文）与
-`answer_relevance`（切题），外加 `avg_ttft_ms`。需要 `DEMO_CHAT_*` / `OPENAI_*` 聊天凭据。
+生成集位于 `evals/generation_cases.json`：20 条有答案题按 8 篇金标文档分层，另加 4 条域外无答案题。
+所有题目复用产品真实的 `stream_answer()` 链路与 `hybrid_parent_child` 策略，保证测的是实际行为而不是旁路实现。
+
+- **answer correctness / faithfulness / answer relevance**：judge 基于检索证据、期望要点和回答打分（0–1）；
+- **citation presence / accuracy / coverage**：从回答中的 `[1]` / `[Source 1]` 确定性解析引用，再核对引用编号与金标文档；
+- **refusal recall**：无答案题必须触发显式拒答或语义等价的无依据拒答；有答案题若误拒答计入 false refusal；
+- **avg TTFT / end-to-end**：记录首 token 与完整请求耗时。
+
+默认 judge 沿用聊天模型，也可通过 `--judge-model` 指定；对会输出 reasoning token 的网关，评测器带空响应重试并使用 JSON mode。
 
 ---
 
@@ -85,34 +96,34 @@ set DEMO_EMBED_BASE_URL=https://api.siliconflow.cn/v1
 set DEMO_CHAT_API_KEY=sk-...
 set DEMO_CHAT_BASE_URL=...
 set DEMO_CHAT_MODEL=...
-.venv\Scripts\python.exe evals/run_eval.py --judge
+.venv\Scripts\python.exe evals/run_eval.py --judge --judge-model deepseek-flash
 ```
 
 输出：刷新 `evals/EVAL_RESULTS.json` 与 `evals/EVAL_RESULTS.md`。
 
 ---
 
-## 4. 当前快照（2026-09-07 · 10 篇文档语料 · lexical-only）
+## 4. 当前快照（2026-09-10 · 10 篇文档语料 · lexical-only）
 
 语料：`producttext/` 10 篇文档 → seed 后 56 父块 / 341 条 chunk（含父子树）。
 金标集：78 条手写，其中 26 条为**块级锚点**（真正会拉开三档策略的子集）。
-Generation eval：disabled（运行 `--judge` 可开启）。
+Generation eval：24 条（20 有答案 + 4 无答案）；generator `deepseek-v4-flash`，judge `deepseek-flash`。
 
 ### 4.1 全量金标（n=78）
 
 | strategy | n | hit@1 | hit@4 | MRR | avg top score | avg retrieve ms |
 |---|---|---|---|---|---|---|
-| naive | 78 | 61.5% | 82.0% | 0.696 | 0.435 | 10.11 |
-| hybrid | 78 | 70.5% | 85.9% | 0.768 | 0.433 | 25.36 |
-| hybrid_parent_child | 78 | 73.1% | 83.3% | 0.775 | 0.394 | 32.23 |
+| naive | 78 | 61.5% | 82.0% | 0.696 | 0.435 | 9.97 |
+| hybrid | 78 | 70.5% | 85.9% | 0.768 | 0.433 | 25.45 |
+| hybrid_parent_child | 78 | 73.1% | 83.3% | 0.775 | 0.394 | 31.89 |
 
 ### 4.2 块级锚点子集（n=26，策略差异的“主战场”）
 
 | strategy | n | hit@1 | hit@4 | MRR | avg retrieve ms |
 |---|---|---|---|---|---|
-| naive | 26 | 65.4% | 84.6% | 0.734 | 10.23 |
-| hybrid | 26 | 69.2% | 88.5% | 0.769 | 25.67 |
-| hybrid_parent_child | 26 | 73.1% | 88.5% | 0.798 | 32.76 |
+| naive | 26 | 65.4% | 84.6% | 0.734 | 10.11 |
+| hybrid | 26 | 69.2% | 88.5% | 0.769 | 25.34 |
+| hybrid_parent_child | 26 | 73.1% | 88.5% | 0.798 | 32.43 |
 
 ### 4.3 结果解读
 
@@ -128,11 +139,30 @@ Generation eval：disabled（运行 `--judge` 可开启）。
 - **延迟**：语料 341 块下，BM25 全内存线性扫描已到 25–32ms（naive 10ms）；这是真实的扩展性瓶颈，
   语料进一步增大时需倒排索引或预计算 TF/DF（下一步优化项）。
 
-### 4.4 局限（面试务必主动说明）
+### 4.4 生成侧结果（n=20 有答案 + 4 无答案）
+
+| metric | value |
+|---|---:|
+| answer correctness | 97.9% |
+| faithfulness | 84.5% |
+| answer relevance | 100.0% |
+| citation presence | 100.0% |
+| citation accuracy | 92.7% |
+| citation coverage | 95.0% |
+| refusal recall | 100.0% |
+| false refusal rate | 5.0% |
+| avg TTFT | 1671.0 ms |
+| avg end-to-end | 3154.5 ms |
+
+结果说明：事实型题目和拒答护栏稳定；剩余失败主要来自 lexical-only 在“RAG 评估指标”“Agent 模块”等问题上
+召回错块，导致回答正确率下降/faithfulness 被判低，或引用了文档内但非目标段的来源。这正是下一阶段升级
+embedding/重排序的输入，而不是 Prompt 参数微调的问题。
+
+### 4.5 局限（面试务必主动说明）
 
 1. 当前 `lexical-only`：向量召回/重排未参与；hybrid 的 RRF+向量、pc 的子块向量召回优势尚未体现。
    配 `DEMO_EMBED_*` 后可复现 `mode: embedding` 的对比；
-2. 生成侧（忠实度/相关度/TTFT）未跑（需 `--judge` 与聊天凭据）；
+2. 生成侧已跑 24 条，但 judge 仍是 LLM 评分；引用和拒答为确定性指标，faithfulness/correctness 会受 judge model 波动影响；
 3. 语料主题以中文产品/客服/SaaS 为主，繁体中文字文档与英文文档（`build-multi-tenant-*`）在词法
    only 下与简体 query 不匹配，属于已知检索边界。
 
@@ -144,6 +174,6 @@ Generation eval：disabled（运行 `--judge` 可开启）。
 - [x] 金标扩到 78 条（新增 28 条手写，带 `"review": true` 标记，覆盖 6 篇多父块长文）——**请复核新增条目**
 - [x] 块级锚点指标 hit@1 / hit@4 / MRR 及 `metrics_block` 子集
 - [ ] （可选）配 `DEMO_EMBED_*`，重跑拿 `embedding` 模式对比表
-- [ ] （可选）`run_eval.py --judge` 补生成侧 faithfulness / relevance / TTFT
+- [x] `run_eval.py --judge` 生成侧 answer correctness / faithfulness / citation / refusal / TTFT
 - [ ] （可选）BM25 倒排索引化，压 retrieve_ms（当前 341 块 ~30ms，线性扫描）
 - [ ] 复核后删除新增条目的 `"review": true` 字段，把金标集固化为最终版

@@ -100,9 +100,23 @@ export default function Dashboard() {
   const tr = (key, vars) => t(lang, key, vars)
 
   const evalRows = data?.eval_results?.metrics || []
+  const generation = data?.eval_results?.generation
   const strategyRows = data?.query_metrics?.by_strategy || {}
   const feedback = data?.feedback || { total: 0, up: 0, down: 0 }
   const reasons = data?.reason_distribution || {}
+  const retrievalSeries = [
+    { key: 'hit_at_1', label: tr('thHit1'), color: 'bg-orange-500' },
+    { key: 'hit_at_4', label: tr('thHit'), color: 'bg-emerald-500' },
+    { key: 'mrr', label: tr('thMrr'), color: 'bg-sky-500' },
+  ]
+  const generationSeries = generation ? [
+    { key: 'answer_correctness', label: tr('answerCorrectness'), color: 'bg-emerald-500' },
+    { key: 'faithfulness', label: tr('faithfulness'), color: 'bg-orange-500' },
+    { key: 'answer_relevance', label: tr('answerRelevance'), color: 'bg-sky-500' },
+    { key: 'citation_accuracy', label: tr('citationAccuracy'), color: 'bg-violet-500' },
+    { key: 'citation_coverage', label: tr('citationCoverage'), color: 'bg-fuchsia-500' },
+    { key: 'refusal_recall', label: tr('refusalRecall'), color: 'bg-rose-500' },
+  ] : []
 
   // 复用抽离出来的三段式导航控件（带有更平滑的 cubic-bezier 缓动动画）
   const navSwitcher = (
@@ -365,6 +379,56 @@ export default function Dashboard() {
                     </tbody>
                   </table>
                 </div>
+
+                <div className="border-t border-white/50 px-8 py-7">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-sky-700">
+                        <BarChart3 className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <h3 className="font-serif text-base font-bold text-slate-900">{tr('retrievalChartTitle')}</h3>
+                        <p className="text-xs font-medium text-slate-500">{tr('retrievalChartDesc')}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-4">
+                      {retrievalSeries.map(series => (
+                        <span key={series.key} className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                          <span className={`h-2.5 w-2.5 rounded-sm ${series.color}`} />
+                          {series.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-7 grid grid-cols-3 gap-3 md:gap-8">
+                    {evalRows.map(row => (
+                      <div key={row.strategy} className="flex min-w-0 flex-col items-center">
+                        <div className="flex h-52 w-full max-w-[170px] items-end justify-center gap-1.5 md:gap-2">
+                          {retrievalSeries.map(series => {
+                            const value = Math.max(0, Math.min(1, Number(row[series.key]) || 0))
+                            return (
+                              <div key={series.key} className="flex h-full flex-1 flex-col items-center justify-end">
+                                <span className="mb-1 text-[10px] font-bold text-slate-500">
+                                  {(value * 100).toFixed(0)}%
+                                </span>
+                                <div
+                                  className={`w-full rounded-t-md ${series.color} shadow-sm`}
+                                  style={{ height: `${Math.max(3, value * 100)}%` }}
+                                  title={`${tr('strategy_' + row.strategy)} · ${series.label}: ${(value * 100).toFixed(1)}%`}
+                                />
+                              </div>
+                            )
+                          })}
+                        </div>
+                        <div className="mt-3 w-full border-t border-slate-200/80 pt-3 text-center">
+                          <div className="truncate text-xs font-black text-slate-800">{tr('strategy_' + row.strategy)}</div>
+                          <div className="mt-1 font-mono text-[10px] font-bold text-slate-400">{row.avg_retrieve_ms}ms</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               {/* 左右分栏：归因分析与在线查询耗时 */}
@@ -462,38 +526,114 @@ export default function Dashboard() {
                       <h2 className="font-serif text-lg font-bold tracking-tight text-slate-900">
                         {tr('llmTitle')}
                       </h2>
-                      <p className="text-xs font-medium text-slate-500">RAG Triad Faithfulness & Answer Relevance</p>
+                      <p className="text-xs font-medium text-slate-500">
+                        {data.eval_results.generation.sample_size} cases · Correctness, grounding, citations & refusal
+                      </p>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
                     <div className="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-xs">
-                      <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{tr('faithfulness')}</div>
-                      <div className="font-serif text-3xl font-bold text-orange-600">
-                        {(data.eval_results.generation.faithfulness * 100).toFixed(0)}%
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-xs">
-                      <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{tr('answerRelevance')}</div>
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{tr('answerCorrectness')}</div>
                       <div className="font-serif text-3xl font-bold text-emerald-700">
-                        {(data.eval_results.generation.answer_relevance * 100).toFixed(0)}%
+                        {((data.eval_results.generation.answer_correctness ?? 0) * 100).toFixed(0)}%
                       </div>
                     </div>
 
                     <div className="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-xs">
-                      <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{tr('avgTtft')}</div>
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{tr('faithfulness')}</div>
+                      <div className="font-serif text-3xl font-bold text-orange-600">
+                        {((data.eval_results.generation.faithfulness ?? 0) * 100).toFixed(0)}%
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-xs">
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{tr('answerRelevance')}</div>
+                      <div className="font-serif text-3xl font-bold text-sky-700">
+                        {((data.eval_results.generation.answer_relevance ?? 0) * 100).toFixed(0)}%
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-xs">
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{tr('citationAccuracy')}</div>
+                      <div className="font-serif text-3xl font-bold text-violet-700">
+                        {((data.eval_results.generation.citation_accuracy ?? 0) * 100).toFixed(0)}%
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-xs">
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{tr('refusalRecall')}</div>
+                      <div className="font-serif text-3xl font-bold text-rose-700">
+                        {((data.eval_results.generation.refusal_recall ?? 0) * 100).toFixed(0)}%
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-xs">
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{tr('avgTtft')}</div>
                       <div className="font-mono text-3xl font-bold text-slate-800">
-                        {data.eval_results.generation.avg_ttft_ms}
-                        <span className="text-xs text-slate-400 ml-1 font-sans">ms</span>
+                        {data.eval_results.generation.avg_ttft_ms ?? 0}
+                        <span className="ml-1 font-sans text-xs text-slate-400">ms</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 grid gap-8 border-t border-white/60 pt-7 lg:grid-cols-[1.5fr_0.8fr] lg:gap-10">
+                    <div>
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <h3 className="font-serif text-base font-bold text-slate-900">{tr('generationChartTitle')}</h3>
+                          <p className="mt-1 text-xs font-medium text-slate-500">{tr('generationChartDesc')}</p>
+                        </div>
+                        <span className="rounded-full bg-white/80 px-3 py-1 font-mono text-[10px] font-black text-slate-500">
+                          {generation.scored_sample_size ?? 0}/{generation.known_sample_size ?? 0}
+                        </span>
+                      </div>
+
+                      <div className="mt-6 space-y-4">
+                        {generationSeries.map(series => {
+                          const value = Math.max(0, Math.min(1, Number(generation[series.key]) || 0))
+                          return (
+                            <div key={series.key} className="grid grid-cols-[minmax(92px,0.8fr)_minmax(120px,2fr)_52px] items-center gap-3">
+                              <span className="truncate text-xs font-bold text-slate-600">{series.label}</span>
+                              <div className="h-3 overflow-hidden rounded-full bg-white/80 ring-1 ring-slate-200/70">
+                                <div
+                                  className={`h-full rounded-full ${series.color}`}
+                                  style={{ width: `${Math.max(2, value * 100)}%` }}
+                                />
+                              </div>
+                              <span className="text-right font-mono text-xs font-black text-slate-800">
+                                {(value * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-white/70 bg-white/70 p-5 shadow-xs">
-                      <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{tr('sampleSize')}</div>
-                      <div className="font-serif text-3xl font-bold text-slate-800">
-                        {data.eval_results.generation.sample_size}
-                      </div>
+                    <div className="lg:border-l lg:border-white/70 lg:pl-8">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">{tr('evalComposition')}</div>
+                      <dl className="mt-4 space-y-3 text-xs">
+                        <div className="flex items-center justify-between gap-4 border-b border-white/60 pb-3">
+                          <dt className="font-bold text-slate-500">{tr('knownCases')}</dt>
+                          <dd className="font-mono font-black text-emerald-700">{generation.known_sample_size ?? 0}</dd>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 border-b border-white/60 pb-3">
+                          <dt className="font-bold text-slate-500">{tr('noAnswerCases')}</dt>
+                          <dd className="font-mono font-black text-rose-700">{generation.negative_sample_size ?? 0}</dd>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 border-b border-white/60 pb-3">
+                          <dt className="font-bold text-slate-500">{tr('flaggedCases')}</dt>
+                          <dd className="font-mono font-black text-orange-700">{generation.failures?.length ?? 0}</dd>
+                        </div>
+                        <div className="flex items-start justify-between gap-4 border-b border-white/60 pb-3">
+                          <dt className="font-bold text-slate-500">{tr('generatorModel')}</dt>
+                          <dd className="max-w-[150px] truncate text-right font-mono font-black text-slate-700">{generation.generator_model || '—'}</dd>
+                        </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <dt className="font-bold text-slate-500">{tr('judgeModel')}</dt>
+                          <dd className="max-w-[150px] truncate text-right font-mono font-black text-slate-700">{generation.judge_model || '—'}</dd>
+                        </div>
+                      </dl>
                     </div>
                   </div>
                 </div>

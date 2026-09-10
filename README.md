@@ -16,7 +16,8 @@
 - **跨语言 RAG**：多语言 Embedding 可直接召回中文切片；英文弱命中时按需轻量改写再检索，生成语言跟随提问语言。
 - **主题分类 · 作用域隔离**：`documents.category` 元数据（智能客服 / 电商售后 / 架构权限 / 产品综合…）；
   前端分类 Chip → 后端**打分前 Metadata 硬过滤**，避免跨领域误召回。`GET /documents/categories` 返回分类树。
-- **评测闭环**：78 条手写金标（`evals/goldset.json`），块级命中 hit@1 / hit@4 / MRR；`/dashboard` 看板直出对比表。
+- **评测闭环**：78 条手写检索金标（块级 hit@1 / hit@4 / MRR）＋ 20 条生成金标与 4 条无答案拒答题；
+  评测 answer correctness、faithfulness、引用准确率和拒答召回率，`/dashboard` 直出对比表。
 - **BYOK + Demo 配额**：访客免 Key 用部署者 Demo Key 体验（全局每分钟 + 单 IP 每小时限流，预设推荐问题走
   **静态答案缓存、不耗 Token**）；填入自己的 Key（`X-Custom-Api-Key`）即绕过限流、解锁无限调用。
 
@@ -82,14 +83,19 @@ npm run dev                        # http://localhost:3000 （CORS 默认放行�
 
 ---
 
-## 🧪 检索评测
+## 🧪 RAG 评测
 
 ```bash
-.venv\Scripts\python.exe evals/run_eval.py                 # 词法：块级 hit@1/hit@4/MRR
-.venv\Scripts\python.exe evals/run_eval.py --judge         # + 生成侧 faithfulness/relevance/TTFT
+# 1) 可离线复现的 lexical-only 检索基线
+.venv\Scripts\python.exe evals/run_eval.py
+
+# 2) 生成侧评测（自动读取 .env；网关有便宜 judge 时建议显式指定）
+.venv\Scripts\python.exe evals/run_eval.py --judge --judge-model deepseek-flash
 ```
 
-- 金标集 `evals/goldset.json`（78 条，覆盖 10 篇语料，含块级子集）；命中锚点=「答案所在文档中关键词覆盖度最高的父块」。
+- 检索金标：`evals/goldset.json`（78 条，含 26 条块级锚点子集），指标为 hit@1 / hit@4 / MRR。
+- 生成金标：`evals/generation_cases.json`（20 条有答案 + 4 条无答案），指标为 answer correctness、faithfulness、
+  answer relevance、citation accuracy/coverage、refusal recall、TTFT。
 - 结果写入 `evals/EVAL_RESULTS.*`，由 `/dashboard` 读取；完整方法论与解读见 **`docs/EVAL_REPORT.md`**。
 
 ---
@@ -127,9 +133,9 @@ docker run --rm -p 8000:8000 \
 │   └── exporters.py           # Markdown/PDF 导出
 ├── frontend/                  # Next.js：/(page.js) /pancake /dashboard；src/lib/api.js、i18n.js
 ├── producttext/               # demo 语料（seed 用，含分类映射）
-├── evals/                     # goldset.json · run_eval.py · EVAL_RESULTS.*
+├── evals/                     # goldset · generation_cases · run_eval · EVAL_RESULTS.*
 ├── scripts/                   # migrate_kb.py · assign_categories.py
-├── tests/                     # test_scope_filter.py（doc/category 作用域回归）
+├── tests/                     # scope filter + evaluator metric regressions
 ├── docs/                      # PRD.md · EVAL_REPORT.md · SUPABASE_DEPLOY.md
 ├── app.py                     # Streamlit 内部调试/评测台（demo / demo1234）
 ├── Dockerfile · .dockerignore
