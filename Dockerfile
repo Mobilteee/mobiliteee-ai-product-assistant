@@ -28,6 +28,9 @@ COPY backend/  backend/
 COPY core/     core/
 # Seed corpus so a fresh deploy can bootstrap the demo KB on first boot.
 COPY producttext/ producttext/
+# Dashboard metrics served by GET /metrics/overview.
+COPY evals/EVAL_RESULTS.json evals/EVAL_RESULTS.json
+RUN test -s /app/evals/EVAL_RESULTS.json
 COPY .env.example .env.example
 
 # Runtime data dir (SQLite by default). Create + own it so the non-root user

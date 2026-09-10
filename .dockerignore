@@ -23,9 +23,11 @@ frontend/
 node_modules/
 .next/
 
-# Tests / eval / docs helpers not needed at runtime
+# Tests / docs helpers not needed at runtime
 tests/
-evals/
+# Only the committed dashboard artifact is needed; raw eval tooling stays out.
+evals/*
+!evals/EVAL_RESULTS.json
 scripts/
 docs/
 
