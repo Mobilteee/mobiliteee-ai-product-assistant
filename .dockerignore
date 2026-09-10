@@ -25,9 +25,8 @@ node_modules/
 
 # Tests / docs helpers not needed at runtime
 tests/
-# Only the committed dashboard artifact is needed; raw eval tooling stays out.
-evals/*
-!evals/EVAL_RESULTS.json
+# Keep committed eval artifacts available to Docker; only scratch dirs are excluded.
+evals/.tmp_*
 scripts/
 docs/
 
